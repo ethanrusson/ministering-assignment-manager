@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter, RouterLink } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
@@ -62,10 +62,6 @@ async function submit() {
       >
         {{ loading ? 'Signing in…' : 'Sign in' }}
       </button>
-      <p class="text-center text-sm text-slate-600">
-        No account?
-        <RouterLink :to="{ name: 'signup' }" class="text-slate-900 underline">Create one</RouterLink>
-      </p>
     </form>
   </main>
 </template>

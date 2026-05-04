@@ -1,0 +1,1 @@
+# ministering-assignment-manager

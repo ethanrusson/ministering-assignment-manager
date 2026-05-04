@@ -1,0 +1,27 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.local
+.env.*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.tsbuildinfo
+coverage
+*.log
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Supabase local dev
+supabase/.temp/
+
+# Private member data — never commit
+docs/lcr.html
+docs/lcr-*.html
+docs/lcr-*.rtf

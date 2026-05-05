@@ -104,7 +104,7 @@ async function remove() {
 
 <template>
   <div
-    class="absolute rounded-md border-2 border-dashed border-slate-300 bg-slate-200/40"
+    class="absolute rounded-md border-2 border-dashed border-stone-300 bg-stone-200/40"
     :style="{
       left: x + 'px',
       top: y + 'px',
@@ -120,13 +120,13 @@ async function remove() {
   >
     <!-- Title bar (move handle) -->
     <div
-      class="flex h-9 cursor-move items-center justify-between gap-2 rounded-t-md border-b border-slate-300 bg-slate-200/80 px-3 text-sm font-medium text-slate-700 backdrop-blur"
+      class="flex h-9 cursor-move items-center justify-between gap-2 rounded-t-md border-b border-stone-300 bg-stone-200/80 px-3 text-sm font-medium text-stone-700 backdrop-blur"
       data-district-handle="move"
       @pointerdown="startMove"
     >
       <span class="truncate">{{ district.name }}</span>
       <div class="flex items-center gap-1" data-no-pan @pointerdown.stop>
-        <button class="rounded px-1 text-xs hover:bg-slate-300/60" title="Rename" @click="rename">
+        <button class="rounded px-1 text-xs hover:bg-stone-300/60" title="Rename" @click="rename">
           ✎
         </button>
         <button

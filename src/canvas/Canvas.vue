@@ -188,7 +188,7 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, viewport });
 <template>
   <div
     ref="root"
-    class="relative h-full w-full select-none overflow-hidden bg-slate-100"
+    class="relative h-full w-full select-none overflow-hidden bg-stone-100"
     style="touch-action: none"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -206,32 +206,32 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, viewport });
 
     <!-- Floating controls -->
     <div
-      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white/90 px-2 py-1 shadow"
+      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -transtone-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white/90 px-2 py-1 shadow"
     >
       <button
-        class="rounded p-1 text-sm hover:bg-slate-100 disabled:opacity-50"
+        class="rounded p-1 text-sm hover:bg-stone-100 disabled:opacity-50"
         title="Zoom out"
         :disabled="viewport.scale <= ZOOM_MIN + 0.001"
         @click="zoomOut(root!.clientWidth / 2, root!.clientHeight / 2)"
       >
         −
       </button>
-      <span class="min-w-[3ch] text-center text-xs tabular-nums text-slate-600">
+      <span class="min-w-[3ch] text-center text-xs tabular-nums text-stone-600">
         {{ zoomPct }}%
       </span>
       <button
-        class="rounded p-1 text-sm hover:bg-slate-100 disabled:opacity-50"
+        class="rounded p-1 text-sm hover:bg-stone-100 disabled:opacity-50"
         title="Zoom in"
         :disabled="viewport.scale >= ZOOM_MAX - 0.001"
         @click="zoomIn(root!.clientWidth / 2, root!.clientHeight / 2)"
       >
         +
       </button>
-      <span class="mx-1 h-4 w-px bg-slate-300"></span>
-      <button class="rounded px-2 py-1 text-xs hover:bg-slate-100" @click="fitToContent">
+      <span class="mx-1 h-4 w-px bg-stone-300"></span>
+      <button class="rounded px-2 py-1 text-xs hover:bg-stone-100" @click="fitToContent">
         Fit
       </button>
-      <button class="rounded px-2 py-1 text-xs hover:bg-slate-100" @click="reset">
+      <button class="rounded px-2 py-1 text-xs hover:bg-stone-100" @click="reset">
         100%
       </button>
     </div>

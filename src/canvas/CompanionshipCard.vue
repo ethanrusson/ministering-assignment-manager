@@ -79,10 +79,10 @@ const isHovered = computed(
 );
 
 const cardClasses = computed(() => {
-  if (isHovered.value) return 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-300';
-  if (severity.value === 'danger') return 'border-danger-400 bg-danger-100/50';
-  if (severity.value === 'warn') return 'border-warn-400 bg-warn-50';
-  return 'border-slate-300 bg-white';
+  if (isHovered.value) return 'ring-2 ring-emerald-400 bg-emerald-50';
+  if (severity.value === 'danger') return 'ring-2 ring-danger-400';
+  if (severity.value === 'warn') return 'ring-2 ring-warn-400';
+  return '';
 });
 
 // Move drag — anchor on the card itself but skip if the user grabbed an
@@ -138,17 +138,11 @@ const startMove = makeStart(
   },
 );
 
-async function removeElder(elderId: string) {
-  await companionships.unassignElder(elderId);
-}
-async function removeHousehold(householdId: string) {
-  await companionships.unassignHousehold(householdId);
-}
 </script>
 
 <template>
   <div
-    class="absolute flex flex-col overflow-hidden cursor-grab rounded-md border shadow-sm select-none active:cursor-grabbing"
+    class="absolute flex flex-col overflow-hidden rounded-2xl bg-stone-100 shadow-md select-none"
     :class="cardClasses"
     :style="{
       left: x + 'px',
@@ -164,54 +158,68 @@ async function removeHousehold(householdId: string) {
     :data-h="CARD_H"
     data-drop-zone="companionship"
     :data-companionship-id="companionship.id"
-    @pointerdown="startMove"
     @pointerenter="transfer.setHover('companionship', companionship.id)"
     @pointerleave="transfer.clearHover('companionship', companionship.id)"
   >
-    <!-- Elder chips -->
-    <div class="flex flex-wrap gap-1 px-3 py-2">
-      <span
-        v-for="elder in elderRows"
-        :key="elder.id"
-        class="group inline-flex items-center gap-1 rounded-full bg-slate-100 pl-2 pr-1 py-1 text-s"
-        data-transfer
-        :data-transfer-kind="'elder'"
-        :data-transfer-id="elder.id"
-        :data-from-companionship="companionship.id"
-        @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, companionship.id)"
-      >
-        <span class="truncate">{{ elder.name }}</span>
-        <AgeBadge :age="elder.age" />
-        <button
-          class="hidden rounded text-slate-400 hover:text-danger-600 group-hover:inline-block"
-          title="Remove from companionship"
-          data-no-pan
-          @click.stop="removeElder(elder.id)"
-          @pointerdown.stop
-        >
-          ×
-        </button>
-      </span>
+    <!-- Drag handle — centered on card surface, no background strip -->
+    <div
+      class="flex shrink-0 cursor-grab items-center justify-center pb-1 pt-2 active:cursor-grabbing"
+      @pointerdown.stop="startMove"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-8 text-stone-300" fill="currentColor" viewBox="0 0 32 10">
+        <rect x="4" y="0" width="24" height="2" rx="1"/>
+        <rect x="4" y="8" width="24" height="2" rx="1"/>
+      </svg>
     </div>
 
+    <!-- Elders -->
+    <div class="px-3 pb-3">
+      <p class="mb-2 text-xs text-stone-400">Elders · {{ elderRows.length }}</p>
+      <div class="flex flex-wrap gap-1.5">
+        <span
+          v-for="elder in elderRows"
+          :key="elder.id"
+          class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm shadow-sm"
+          data-transfer
+          :data-transfer-kind="'elder'"
+          :data-transfer-id="elder.id"
+          :data-from-companionship="companionship.id"
+          @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, companionship.id)"
+        >
+          <span class="truncate">{{ elder.name }}</span>
+          <AgeBadge :age="elder.age" />
+        </span>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="mx-3 border-t border-stone-200" />
+
     <!-- Households -->
-    <div class="border-t border-slate-200 px-3 py-2">
-      <div v-if="!householdRows.length" class="text-center text-xs text-slate-400">
+    <div class="px-3 py-3">
+      <p class="mb-2 text-xs text-stone-400">Households · {{ householdRows.length }}</p>
+      <div v-if="!householdRows.length" class="text-center text-xs text-stone-400">
         No households assigned
       </div>
-      <ul v-else class="space-y-1">
+      <ul v-else class="space-y-1.5">
         <li
           v-for="h in householdRows"
           :key="h.id"
-          class="group flex items-center gap-4 text-s"
+          class="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-sm"
           data-transfer
           :data-transfer-kind="'household'"
           :data-transfer-id="h.id"
           :data-from-companionship="companionship.id"
           @pointerdown.stop="transfer.startDrag($event, 'household', h.id, companionship.id)"
         >
+          <!-- Grip dots -->
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-2.5 shrink-0 text-stone-300" fill="currentColor" viewBox="0 0 8 12">
+            <circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/>
+            <circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/>
+            <circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/>
+          </svg>
           <span class="flex-1 truncate">{{ h.name }}</span>
-          <span class="flex shrink-0 gap-0.5">
+          <span class="flex shrink-0 gap-1">
             <LabelChip
               v-for="lid in households.labelsForHousehold.get(h.id) ?? []"
               :key="lid"
@@ -219,15 +227,6 @@ async function removeHousehold(householdId: string) {
               :color="labels.byId.get(lid)?.color ?? '#888'"
             />
           </span>
-          <button
-            class="hidden rounded text-slate-400 hover:text-danger-600 group-hover:inline-block"
-            title="Unassign household"
-            data-no-pan
-            @click.stop="removeHousehold(h.id)"
-            @pointerdown.stop
-          >
-            ×
-          </button>
         </li>
       </ul>
     </div>

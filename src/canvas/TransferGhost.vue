@@ -21,7 +21,7 @@ const label = computed(() => {
   <Teleport to="body">
     <div
       v-if="transfer.state.active"
-      class="pointer-events-none fixed z-[100] -translate-x-2 -translate-y-2 rounded-md border border-slate-400 bg-white px-2 py-1 text-xs font-medium text-slate-700 shadow-lg"
+      class="pointer-events-none fixed z-[100] -transtone-x-2 -transtone-y-2 rounded-md border border-stone-400 bg-white px-2 py-1 text-xs font-medium text-stone-700 shadow-lg"
       :style="{
         left: transfer.state.cursorX + 'px',
         top: transfer.state.cursorY + 'px',

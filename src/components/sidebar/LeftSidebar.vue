@@ -162,7 +162,7 @@ const householdsHovered = computed(
     during the width transition without clipping the button.
   -->
   <div
-    class="fixed h-full flex-shrink-0 transition-[width] duration-200 border border-slate-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
+    class="fixed h-full flex-shrink-0 transition-[width] duration-200 border border-stone-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
     :class="sidebarOpen ? 'w-[320px]' : 'w-3'"
   >
     <!-- Content pane (clips at the wrapper boundary) -->
@@ -175,20 +175,20 @@ const householdsHovered = computed(
       data-drop-zone="sidebar-elders"
     >
       <!-- Header -->
-      <div class="flex shrink-0 items-center border-b border-slate-200 px-3 py-2">
+      <div class="flex shrink-0 items-center border-b border-stone-200 px-3 py-2">
         <button
           class="flex flex-1 items-center gap-1.5 text-left"
           @click="eldersOpen = !eldersOpen"
           @pointerdown.stop
         >
-          <span class="text-[10px] text-slate-400">{{ eldersOpen ? '▾' : '▸' }}</span>
-          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">
+          <span class="text-[10px] text-stone-400">{{ eldersOpen ? '▾' : '▸' }}</span>
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-600">
             Unassigned Elders
           </h2>
         </button>
         <button
           v-if="eldersOpen"
-          class="rounded px-2 py-1 text-xs hover:bg-slate-100"
+          class="rounded px-2 py-1 text-xs hover:bg-stone-100"
           @click="elderAdding = !elderAdding"
           @pointerdown.stop
         >
@@ -198,14 +198,14 @@ const householdsHovered = computed(
 
       <!-- Body (visible when open) -->
       <div v-if="eldersOpen" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div class="shrink-0 space-y-2 border-b border-slate-200 px-3 py-2">
+        <div class="shrink-0 space-y-2 border-b border-stone-200 px-3 py-2">
           <input
             v-model="elderSearch"
             type="search"
             placeholder="Search elders…"
-            class="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
-          <label class="flex items-center gap-2 text-xs text-slate-600">
+          <label class="flex items-center gap-2 text-xs text-stone-600">
             <input v-model="elderShowHidden" type="checkbox" />
             Show hidden
           </label>
@@ -213,28 +213,28 @@ const householdsHovered = computed(
 
         <form
           v-if="elderAdding"
-          class="shrink-0 space-y-2 border-b border-slate-200 bg-slate-50 px-3 py-2"
+          class="shrink-0 space-y-2 border-b border-stone-200 bg-stone-50 px-3 py-2"
           @submit.prevent="commitAddElder"
         >
           <input
             v-model="newElderName"
             placeholder="Full name"
             required
-            class="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
           <input
             v-model="newElderAge"
             type="number"
             min="0"
             placeholder="Age (optional)"
-            class="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
-          <button type="submit" class="w-full rounded bg-slate-900 px-2 py-1 text-xs text-white">
+          <button type="submit" class="w-full rounded bg-stone-900 px-2 py-1 text-xs text-white">
             Add elder
           </button>
         </form>
 
-        <ul class="flex-1 divide-y divide-slate-100 overflow-y-auto">
+        <ul class="flex-1 divide-y divide-stone-100 overflow-y-auto">
           <li
             v-for="elder in filteredElders"
             :key="elder.id"
@@ -254,32 +254,36 @@ const householdsHovered = computed(
             <AgeBadge :age="elder.age" />
             <div class="hidden gap-1 group-hover:flex">
               <button
-                class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                 title="Rename"
                 @pointerdown.stop
                 @click="renameElder(elder.id, elder.name)"
               >✎</button>
               <button
-                class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                 title="Set age"
                 @pointerdown.stop
                 @click="setElderAge(elder.id, elder.age)"
               >#</button>
               <button
-                class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                 :title="elder.hidden ? 'Unhide' : 'Hide'"
                 @pointerdown.stop
                 @click="toggleElderHidden(elder.id, elder.hidden)"
               >{{ elder.hidden ? '◐' : '○' }}</button>
               <button
-                class="rounded p-1 text-xs text-danger-600 hover:bg-danger-100"
+                class="rounded p-1 text-stone-400 hover:text-danger-600 hover:bg-danger-50"
                 title="Delete"
                 @pointerdown.stop
                 @click="removeElder(elder.id, elder.name)"
-              >×</button>
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                </svg>
+              </button>
             </div>
           </li>
-          <li v-if="!filteredElders.length" class="px-3 py-6 text-center text-xs text-slate-400">
+          <li v-if="!filteredElders.length" class="px-3 py-6 text-center text-xs text-stone-400">
             No unassigned elders.
           </li>
         </ul>
@@ -288,25 +292,25 @@ const householdsHovered = computed(
 
     <!-- ── Households section ─────────────────────────────────────────── -->
     <div
-      class="flex flex-col border-t border-slate-300 transition-colors"
+      class="flex flex-col border-t border-stone-300 transition-colors"
       :class="[householdsOpen ? 'flex-1 min-h-0' : 'shrink-0', householdsHovered && 'bg-emerald-50']"
       data-drop-zone="sidebar-households"
     >
       <!-- Header -->
-      <div class="flex shrink-0 items-center border-b border-slate-200 px-3 py-2">
+      <div class="flex shrink-0 items-center border-b border-stone-200 px-3 py-2">
         <button
           class="flex flex-1 items-center gap-1.5 text-left"
           @click="householdsOpen = !householdsOpen"
           @pointerdown.stop
         >
-          <span class="text-[10px] text-slate-400">{{ householdsOpen ? '▾' : '▸' }}</span>
-          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">
+          <span class="text-[10px] text-stone-400">{{ householdsOpen ? '▾' : '▸' }}</span>
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-600">
             Unassigned Households
           </h2>
         </button>
         <button
           v-if="householdsOpen"
-          class="rounded px-2 py-1 text-xs hover:bg-slate-100"
+          class="rounded px-2 py-1 text-xs hover:bg-stone-100"
           @click="householdAdding = !householdAdding"
           @pointerdown.stop
         >
@@ -316,12 +320,12 @@ const householdsHovered = computed(
 
       <!-- Body (visible when open) -->
       <div v-if="householdsOpen" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div class="shrink-0 space-y-2 border-b border-slate-200 px-3 py-2">
+        <div class="shrink-0 space-y-2 border-b border-stone-200 px-3 py-2">
           <input
             v-model="householdSearch"
             type="search"
             placeholder="Search households…"
-            class="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
           <div v-if="labels.items.length" class="flex flex-wrap gap-1">
             <button
@@ -329,7 +333,7 @@ const householdsHovered = computed(
               :key="l.id"
               class="rounded-full border px-2 py-0.5 text-[10px]"
               :class="
-                filterLabelIds.has(l.id) ? 'border-slate-700 bg-slate-100' : 'border-slate-200'
+                filterLabelIds.has(l.id) ? 'border-stone-700 bg-stone-100' : 'border-stone-200'
               "
               :style="{ color: l.color }"
               @click="toggleLabelFilter(l.id)"
@@ -337,7 +341,7 @@ const householdsHovered = computed(
               {{ l.name }}
             </button>
           </div>
-          <label class="flex items-center gap-2 text-xs text-slate-600">
+          <label class="flex items-center gap-2 text-xs text-stone-600">
             <input v-model="householdShowHidden" type="checkbox" />
             Show hidden
           </label>
@@ -345,21 +349,21 @@ const householdsHovered = computed(
 
         <form
           v-if="householdAdding"
-          class="shrink-0 space-y-2 border-b border-slate-200 bg-slate-50 px-3 py-2"
+          class="shrink-0 space-y-2 border-b border-stone-200 bg-stone-50 px-3 py-2"
           @submit.prevent="commitAddHousehold"
         >
           <input
             v-model="newHouseholdName"
             placeholder="Family name"
             required
-            class="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+            class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
-          <button type="submit" class="w-full rounded bg-slate-900 px-2 py-1 text-xs text-white">
+          <button type="submit" class="w-full rounded bg-stone-900 px-2 py-1 text-xs text-white">
             Add household
           </button>
         </form>
 
-        <ul class="flex-1 divide-y divide-slate-100 overflow-y-auto">
+        <ul class="flex-1 divide-y divide-stone-100 overflow-y-auto">
           <li
             v-for="h in filteredHouseholds"
             :key="h.id"
@@ -371,29 +375,33 @@ const householdsHovered = computed(
               <span class="flex-1 truncate text-sm">{{ h.name }}</span>
               <div class="hidden gap-1 group-hover:flex">
                 <button
-                  class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                   title="Rename"
                   @pointerdown.stop
                   @click="renameHousehold(h.id, h.name)"
                 >✎</button>
                 <button
-                  class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                   title="Edit labels"
                   @pointerdown.stop
                   @click="editLabels(h.id)"
                 >⌘</button>
                 <button
-                  class="rounded p-1 text-xs text-slate-500 hover:bg-slate-100"
+                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
                   :title="h.hidden ? 'Unhide' : 'Hide'"
                   @pointerdown.stop
                   @click="toggleHouseholdHidden(h.id, h.hidden)"
                 >{{ h.hidden ? '◐' : '○' }}</button>
                 <button
-                  class="rounded p-1 text-xs text-danger-600 hover:bg-danger-100"
+                  class="rounded p-1 text-stone-400 hover:text-danger-600 hover:bg-danger-50"
                   title="Delete"
                   @pointerdown.stop
                   @click="removeHousehold(h.id, h.name)"
-                >×</button>
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                  </svg>
+                </button>
               </div>
             </div>
             <div
@@ -408,7 +416,7 @@ const householdsHovered = computed(
               />
             </div>
           </li>
-          <li v-if="!filteredHouseholds.length" class="px-3 py-6 text-center text-xs text-slate-400">
+          <li v-if="!filteredHouseholds.length" class="px-3 py-6 text-center text-xs text-stone-400">
             No unassigned households.
           </li>
         </ul>
@@ -420,7 +428,7 @@ const householdsHovered = computed(
 
     <!-- Floating toggle: 24×24, centered vertically on the right border -->
     <button
-      class="absolute -right-3 top-1/2 z-10 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-slate-300 bg-white text-xs text-slate-400 shadow-sm hover:bg-slate-50 hover:text-slate-600"
+      class="absolute -right-3 top-1/2 z-10 flex h-6 w-6 -transtone-y-1/2 items-center justify-center rounded-full border border-stone-300 bg-white text-xs text-stone-400 shadow-sm hover:bg-stone-50 hover:text-stone-600"
       :title="sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
       @click="sidebarOpen = !sidebarOpen"
       @pointerdown.stop

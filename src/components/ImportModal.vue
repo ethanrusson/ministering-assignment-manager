@@ -149,15 +149,15 @@ async function apply() {
       @click.self="close"
     >
       <div class="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-xl">
-        <header class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <header class="flex items-center justify-between border-b border-stone-200 px-5 py-3">
           <h2 class="text-lg font-semibold">Import from LCR</h2>
-          <button class="rounded p-1 hover:bg-slate-100" @click="close">×</button>
+          <button class="rounded p-1 hover:bg-stone-100" @click="close">×</button>
         </header>
 
         <div class="flex-1 overflow-y-auto p-5">
           <!-- Phase: paste -->
           <div v-if="phase === 'paste'" class="space-y-3">
-            <p class="text-sm text-slate-600">
+            <p class="text-sm text-stone-600">
               On the LCR ministering page, save the page (Cmd+S → "Webpage, HTML Only") or copy
               the source (Cmd+Option+U then Cmd+A, Cmd+C). Paste the contents below.
             </p>
@@ -165,19 +165,19 @@ async function apply() {
               v-model="html"
               rows="14"
               spellcheck="false"
-              class="w-full rounded border border-slate-300 px-3 py-2 font-mono text-xs"
+              class="w-full rounded border border-stone-300 px-3 py-2 font-mono text-xs"
               placeholder="<!doctype html>…"
             />
             <p v-if="errorMsg" class="text-sm text-danger-600">{{ errorMsg }}</p>
             <div class="flex justify-end gap-2">
               <button
-                class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+                class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
                 @click="close"
               >
                 Cancel
               </button>
               <button
-                class="rounded bg-slate-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+                class="rounded bg-stone-900 px-3 py-1 text-sm text-white disabled:opacity-50"
                 :disabled="!html.trim()"
                 @click="preview"
               >
@@ -189,11 +189,11 @@ async function apply() {
           <!-- Phase: preview -->
           <div v-else-if="phase === 'preview' && diff && stats && parsed" class="space-y-4">
             <div
-              class="grid grid-cols-2 gap-3 rounded border border-slate-200 bg-slate-50 p-3 text-sm"
+              class="grid grid-cols-2 gap-3 rounded border border-stone-200 bg-stone-50 p-3 text-sm"
             >
               <div>
                 <div class="font-semibold">Found in import</div>
-                <ul class="text-slate-700">
+                <ul class="text-stone-700">
                   <li>{{ parsed.districts.length }} districts</li>
                   <li>{{ parsed.companionships.length }} companionships</li>
                   <li>{{ parsed.elders.length }} elders</li>
@@ -202,11 +202,11 @@ async function apply() {
               </div>
               <div>
                 <div class="font-semibold">Will apply</div>
-                <ul class="text-slate-700">
+                <ul class="text-stone-700">
                   <li>+{{ stats.eldersAdded }} new elders</li>
                   <li>{{ stats.eldersAgeChanged }} elder ages updated</li>
                   <li>+{{ stats.householdsAdded }} new households</li>
-                  <li class="text-slate-500">
+                  <li class="text-stone-500">
                     {{ stats.eldersUnchanged }} elders + {{ stats.householdsUnchanged }} households
                     already match (no change)
                   </li>
@@ -214,7 +214,7 @@ async function apply() {
               </div>
             </div>
 
-            <details v-if="diff.elders.some((e) => e.kind === 'add')" class="rounded border border-slate-200">
+            <details v-if="diff.elders.some((e) => e.kind === 'add')" class="rounded border border-stone-200">
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
                 New elders ({{ stats.eldersAdded }})
               </summary>
@@ -225,12 +225,12 @@ async function apply() {
                   class="flex justify-between"
                 >
                   <span>{{ c.parsed.name }}</span>
-                  <span class="text-slate-500">{{ c.parsed.age ?? '—' }}</span>
+                  <span class="text-stone-500">{{ c.parsed.age ?? '—' }}</span>
                 </li>
               </ul>
             </details>
 
-            <details v-if="stats.eldersAgeChanged" class="rounded border border-slate-200">
+            <details v-if="stats.eldersAgeChanged" class="rounded border border-stone-200">
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
                 Age changes ({{ stats.eldersAgeChanged }})
               </summary>
@@ -241,12 +241,12 @@ async function apply() {
                   class="flex justify-between"
                 >
                   <span>{{ c.parsed.name }}</span>
-                  <span class="text-slate-500">{{ c.prevAge ?? '—' }} → {{ c.parsed.age ?? '—' }}</span>
+                  <span class="text-stone-500">{{ c.prevAge ?? '—' }} → {{ c.parsed.age ?? '—' }}</span>
                 </li>
               </ul>
             </details>
 
-            <details v-if="diff.households.some((h) => h.kind === 'add')" class="rounded border border-slate-200">
+            <details v-if="diff.households.some((h) => h.kind === 'add')" class="rounded border border-stone-200">
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
                 New households ({{ stats.householdsAdded }})
               </summary>
@@ -266,8 +266,8 @@ async function apply() {
                   stats.orphanElders + stats.orphanHouseholds
                 }})
               </summary>
-              <div class="px-3 py-2 text-xs text-slate-700">
-                <p class="mb-2 text-slate-600">
+              <div class="px-3 py-2 text-xs text-stone-700">
+                <p class="mb-2 text-stone-600">
                   These won't be deleted. Hide or remove them manually if they're stale.
                 </p>
                 <ul class="space-y-0.5">
@@ -279,12 +279,12 @@ async function apply() {
               </div>
             </details>
 
-            <div class="rounded border border-slate-200 p-3">
+            <div class="rounded border border-stone-200 p-3">
               <label class="flex items-start gap-2 text-sm">
                 <input v-model="importStructure" type="checkbox" class="mt-0.5" />
                 <span>
                   <span class="font-medium">Also import districts and companionships</span>
-                  <span class="block text-xs text-slate-500">
+                  <span class="block text-xs text-stone-500">
                     Lays out
                     {{ parsed.districts.length }} districts and
                     {{ parsed.companionships.length }} companionships at default positions.
@@ -306,13 +306,13 @@ async function apply() {
 
             <div class="flex justify-end gap-2">
               <button
-                class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+                class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
                 @click="phase = 'paste'"
               >
                 Back
               </button>
               <button
-                class="rounded bg-slate-900 px-3 py-1 text-sm text-white"
+                class="rounded bg-stone-900 px-3 py-1 text-sm text-white"
                 @click="apply"
               >
                 Apply
@@ -322,17 +322,17 @@ async function apply() {
 
           <!-- Phase: applying -->
           <div v-else-if="phase === 'applying'" class="space-y-2 py-12 text-center">
-            <p class="text-sm text-slate-600">Writing changes…</p>
+            <p class="text-sm text-stone-600">Writing changes…</p>
           </div>
 
           <!-- Phase: done -->
           <div v-else-if="phase === 'done'" class="space-y-3">
-            <p class="text-sm font-medium text-slate-700">Import complete.</p>
-            <ul class="space-y-1 rounded border border-slate-200 bg-slate-50 p-3 text-sm">
+            <p class="text-sm font-medium text-stone-700">Import complete.</p>
+            <ul class="space-y-1 rounded border border-stone-200 bg-stone-50 p-3 text-sm">
               <li v-for="(line, i) in applyLog" :key="i">{{ line }}</li>
             </ul>
             <div class="flex justify-end">
-              <button class="rounded bg-slate-900 px-3 py-1 text-sm text-white" @click="close">
+              <button class="rounded bg-stone-900 px-3 py-1 text-sm text-white" @click="close">
                 Done
               </button>
             </div>

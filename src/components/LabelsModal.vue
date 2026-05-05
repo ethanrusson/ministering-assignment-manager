@@ -56,24 +56,24 @@ async function remove(id: string, name: string) {
       <div class="w-full max-w-md space-y-4 rounded-lg bg-white p-5 shadow-xl">
         <header class="flex items-center justify-between">
           <h2 class="text-lg font-semibold">Manage Labels</h2>
-          <button class="rounded p-1 hover:bg-slate-100" @click="emit('close')">×</button>
+          <button class="rounded p-1 hover:bg-stone-100" @click="emit('close')">×</button>
         </header>
 
         <ul class="max-h-64 space-y-1 overflow-y-auto">
           <li
             v-for="l in labels.items"
             :key="l.id"
-            class="flex items-center gap-2 rounded border border-slate-200 px-2 py-1"
+            class="flex items-center gap-2 rounded border border-stone-200 px-2 py-1"
           >
             <span
-              class="h-4 w-4 shrink-0 rounded-full border border-slate-300"
+              class="h-4 w-4 shrink-0 rounded-full border border-stone-300"
               :style="{ backgroundColor: l.color }"
             />
             <span class="flex-1 text-sm">{{ l.name }}</span>
-            <button class="rounded p-1 text-xs hover:bg-slate-100" @click="rename(l.id, l.name)">
+            <button class="rounded p-1 text-xs hover:bg-stone-100" @click="rename(l.id, l.name)">
               Rename
             </button>
-            <button class="rounded p-1 text-xs hover:bg-slate-100" @click="recolor(l.id, l.color)">
+            <button class="rounded p-1 text-xs hover:bg-stone-100" @click="recolor(l.id, l.color)">
               Color
             </button>
             <button
@@ -85,27 +85,27 @@ async function remove(id: string, name: string) {
           </li>
           <li
             v-if="!labels.items.length"
-            class="rounded border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400"
+            class="rounded border border-dashed border-stone-200 px-3 py-4 text-center text-xs text-stone-400"
           >
             No labels yet.
           </li>
         </ul>
 
-        <form @submit.prevent="add" class="space-y-2 border-t border-slate-200 pt-4">
-          <h3 class="text-sm font-medium text-slate-700">Add label</h3>
+        <form @submit.prevent="add" class="space-y-2 border-t border-stone-200 pt-4">
+          <h3 class="text-sm font-medium text-stone-700">Add label</h3>
           <div class="flex gap-2">
             <input
               v-model="newName"
               required
               placeholder="Name (e.g. Widow)"
-              class="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+              class="flex-1 rounded border border-stone-300 px-2 py-1 text-sm"
             />
             <input
               v-model="newColor"
               type="color"
-              class="h-8 w-12 rounded border border-slate-300"
+              class="h-8 w-12 rounded border border-stone-300"
             />
-            <button class="rounded bg-slate-900 px-3 py-1 text-sm text-white">Add</button>
+            <button class="rounded bg-stone-900 px-3 py-1 text-sm text-white">Add</button>
           </div>
           <p v-if="errorMsg" class="text-xs text-danger-600">{{ errorMsg }}</p>
         </form>

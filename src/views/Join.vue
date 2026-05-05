@@ -146,19 +146,19 @@ async function signUpAndJoin() {
 <template>
   <main class="flex min-h-screen items-center justify-center px-4">
     <!-- Loading -->
-    <div v-if="status === 'loading'" class="text-sm text-slate-400">Validating invite…</div>
+    <div v-if="status === 'loading'" class="text-sm text-stone-400">Validating invite…</div>
 
     <!-- Joining (already authed) -->
-    <div v-else-if="status === 'joining'" class="text-sm text-slate-400">Joining ward…</div>
+    <div v-else-if="status === 'joining'" class="text-sm text-stone-400">Joining ward…</div>
 
     <!-- Invalid / expired invite -->
     <div
       v-else-if="status === 'invalid' || status === 'error'"
-      class="w-full max-w-sm space-y-3 rounded-lg border border-slate-200 bg-white p-6 shadow-sm text-center"
+      class="w-full max-w-sm space-y-3 rounded-lg border border-stone-200 bg-white p-6 shadow-sm text-center"
     >
-      <p class="text-base font-semibold text-slate-800">Invalid invite</p>
-      <p class="text-sm text-slate-500">{{ errorMsg }}</p>
-      <a href="/login" class="inline-block text-sm text-slate-700 underline hover:text-slate-900">
+      <p class="text-base font-semibold text-stone-800">Invalid invite</p>
+      <p class="text-sm text-stone-500">{{ errorMsg }}</p>
+      <a href="/login" class="inline-block text-sm text-stone-700 underline hover:text-stone-900">
         Go to sign in
       </a>
     </div>
@@ -167,15 +167,15 @@ async function signUpAndJoin() {
     <form
       v-else-if="status === 'valid'"
       @submit.prevent="signUpAndJoin"
-      class="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      class="w-full max-w-sm space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
     >
       <h1 class="text-xl font-semibold">Join your ward</h1>
-      <p class="text-sm text-slate-500">
+      <p class="text-sm text-stone-500">
         You've been invited. Create a password to get started.
       </p>
 
       <div>
-        <label class="block text-sm font-medium text-slate-700" for="join-email">Email</label>
+        <label class="block text-sm font-medium text-stone-700" for="join-email">Email</label>
         <input
           id="join-email"
           v-model="email"
@@ -183,24 +183,24 @@ async function signUpAndJoin() {
           required
           readonly
           autocomplete="email"
-          class="mt-1 w-full rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 focus:outline-none"
+          class="mt-1 w-full rounded border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-600 focus:outline-none"
         />
       </div>
 
       <div>
-        <label class="block text-sm font-medium text-slate-700" for="join-password">Password</label>
+        <label class="block text-sm font-medium text-stone-700" for="join-password">Password</label>
         <input
           id="join-password"
           v-model="password"
           type="password"
           required
           autocomplete="new-password"
-          class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          class="mt-1 w-full rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none"
         />
       </div>
 
       <div>
-        <label class="block text-sm font-medium text-slate-700" for="join-confirm">
+        <label class="block text-sm font-medium text-stone-700" for="join-confirm">
           Confirm password
         </label>
         <input
@@ -209,7 +209,7 @@ async function signUpAndJoin() {
           type="password"
           required
           autocomplete="new-password"
-          class="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+          class="mt-1 w-full rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-500 focus:outline-none"
         />
       </div>
 
@@ -218,7 +218,7 @@ async function signUpAndJoin() {
       <button
         type="submit"
         :disabled="formLoading"
-        class="w-full rounded bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
+        class="w-full rounded bg-stone-900 px-3 py-2 text-sm text-white hover:bg-stone-800 disabled:opacity-60"
       >
         {{ formLoading ? 'Creating account…' : 'Create account & join' }}
       </button>

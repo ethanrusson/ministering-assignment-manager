@@ -81,7 +81,7 @@ const isEmptyCanvas = computed(
 <template>
   <div class="flex h-screen flex-col">
     <header
-      class="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-2"
+      class="flex items-center justify-between border-b border-stone-200 bg-stone-100 px-4 py-2"
     >
       <!-- Ward name — admins can click to rename inline -->
       <div class="group flex items-center gap-1.5">
@@ -89,7 +89,7 @@ const isEmptyCanvas = computed(
           v-if="editingName"
           ref="nameInput"
           v-model="nameEdit"
-          class="rounded border border-slate-300 bg-white px-2 py-0.5 text-base font-semibold focus:border-slate-500 focus:outline-none"
+          class="rounded border border-stone-300 bg-white px-2 py-0.5 text-base font-semibold focus:border-stone-500 focus:outline-none"
           @blur="saveName"
           @keydown.enter.prevent="saveName"
           @keydown.escape.prevent="cancelNameEdit"
@@ -97,7 +97,7 @@ const isEmptyCanvas = computed(
         <template v-else>
           <h1
             class="text-base font-semibold"
-            :class="auth.wardRole === 'admin' ? 'cursor-pointer hover:text-slate-600' : ''"
+            :class="auth.wardRole === 'admin' ? 'cursor-pointer hover:text-stone-600' : ''"
             :title="auth.wardRole === 'admin' ? 'Click to rename' : undefined"
             @click="startNameEdit"
           >
@@ -105,7 +105,7 @@ const isEmptyCanvas = computed(
           </h1>
           <button
             v-if="auth.wardRole === 'admin'"
-            class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600 transition-opacity text-xs leading-none"
+            class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-opacity text-xs leading-none"
             title="Rename ward"
             @click="startNameEdit"
           >
@@ -115,26 +115,26 @@ const isEmptyCanvas = computed(
       </div>
       <div class="flex items-center gap-2">
         <button
-          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
           @click="labelsOpen = true"
         >
           Manage Labels
         </button>
         <button
-          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
           @click="importOpen = true"
         >
           Import
         </button>
         <button
           v-if="auth.wardRole === 'admin'"
-          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
           @click="inviteOpen = true"
         >
           Invite
         </button>
         <button
-          class="rounded border border-slate-500 px-3 py-1 text-sm bg-slate-100 hover:bg-slate-200"
+          class="rounded border border-stone-500 px-3 py-1 text-sm bg-stone-100 hover:bg-stone-200"
           @click="signOut"
         >
           Sign out
@@ -147,15 +147,15 @@ const isEmptyCanvas = computed(
       <section class="h-screen relative overflow-hidden" data-drop-zone="canvas">
         <div
           v-if="loading"
-          class="flex h-full items-center justify-center text-sm text-slate-400"
+          class="flex h-full items-center justify-center text-sm text-stone-400"
         >
           Loading…
         </div>
         <div
           v-else-if="isEmptyCanvas"
-          class="flex h-full items-center justify-center bg-slate-100"
+          class="flex h-full items-center justify-center bg-stone-100"
         >
-          <div class="max-w-md p-8 text-center text-slate-500">
+          <div class="max-w-md p-8 text-center text-stone-500">
             <p class="mb-2 text-base font-medium">Empty canvas</p>
             <p class="text-xs">
               Click “Import LCR HTML” to populate your districts and companionships, or drag two

@@ -29,36 +29,36 @@ async function submit() {
   <main class="flex min-h-screen items-center justify-center px-4">
     <form
       @submit.prevent="submit"
-      class="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
+      class="w-full max-w-sm space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
     >
       <h1 class="text-xl font-semibold">Sign in</h1>
       <div>
-        <label class="block text-sm font-medium text-slate-700" for="email">Email</label>
+        <label class="block text-sm font-medium text-stone-700" for="email">Email</label>
         <input
           id="email"
           v-model="email"
           type="email"
           required
           autocomplete="email"
-          class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+          class="mt-1 w-full rounded border border-stone-300 px-3 py-2 focus:border-stone-500 focus:outline-none"
         />
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-700" for="password">Password</label>
+        <label class="block text-sm font-medium text-stone-700" for="password">Password</label>
         <input
           id="password"
           v-model="password"
           type="password"
           required
           autocomplete="current-password"
-          class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+          class="mt-1 w-full rounded border border-stone-300 px-3 py-2 focus:border-stone-500 focus:outline-none"
         />
       </div>
       <p v-if="errorMsg" class="text-sm text-danger-600">{{ errorMsg }}</p>
       <button
         type="submit"
         :disabled="loading"
-        class="w-full rounded bg-slate-900 px-3 py-2 text-white hover:bg-slate-800 disabled:opacity-60"
+        class="w-full rounded bg-stone-900 px-3 py-2 text-white hover:bg-stone-800 disabled:opacity-60"
       >
         {{ loading ? 'Signing in…' : 'Sign in' }}
       </button>

@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const session = ref<Session | null>(null);
   const wardId = ref<string | null>(null);
   const wardRole = ref<'admin' | 'member' | null>(null);
+  const wardName = ref<string | null>(null);
   const ready = ref(false);
 
   async function init() {
@@ -21,19 +22,41 @@ export const useAuthStore = defineStore('auth', () => {
       session.value = s;
       user.value = s?.user ?? null;
       if (user.value) await loadWard();
-      else { wardId.value = null; wardRole.value = null; }
+      else { wardId.value = null; wardRole.value = null; wardName.value = null; }
     });
   }
 
   async function loadWard() {
-    const { data } = await supabase
+    const { data: membership } = await supabase
       .from('ward_members')
       .select('ward_id, role')
       .eq('user_id', user.value!.id)
       .limit(1)
       .single();
-    wardId.value = data?.ward_id ?? null;
-    wardRole.value = (data?.role as 'admin' | 'member') ?? null;
+    wardId.value = membership?.ward_id ?? null;
+    wardRole.value = (membership?.role as 'admin' | 'member') ?? null;
+
+    if (membership?.ward_id) {
+      const { data: ward } = await supabase
+        .from('wards')
+        .select('name')
+        .eq('id', membership.ward_id)
+        .single();
+      wardName.value = ward?.name ?? null;
+    } else {
+      wardName.value = null;
+    }
+  }
+
+  async function updateWardName(name: string) {
+    const trimmed = name.trim();
+    if (!wardId.value || !trimmed) return;
+    const { error } = await supabase
+      .from('wards')
+      .update({ name: trimmed })
+      .eq('id', wardId.value);
+    if (error) throw error;
+    wardName.value = trimmed;
   }
 
   async function signIn(email: string, password: string) {
@@ -50,5 +73,5 @@ export const useAuthStore = defineStore('auth', () => {
     await supabase.auth.signOut();
   }
 
-  return { user, session, wardId, wardRole, ready, init, signIn, signUp, signOut };
+  return { user, session, wardId, wardRole, wardName, ready, init, signIn, signUp, signOut, updateWardName };
 });

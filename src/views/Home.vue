@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
@@ -26,6 +26,30 @@ const labelsOpen = ref(false);
 const importOpen = ref(false);
 const inviteOpen = ref(false);
 const loading = ref(true);
+
+// Ward name inline edit
+const editingName = ref(false);
+const nameInput = ref<HTMLInputElement | null>(null);
+const nameEdit = ref('');
+
+async function startNameEdit() {
+  if (auth.wardRole !== 'admin') return;
+  nameEdit.value = auth.wardName ?? '';
+  editingName.value = true;
+  await nextTick();
+  nameInput.value?.select();
+}
+
+async function saveName() {
+  editingName.value = false;
+  if (nameEdit.value.trim() && nameEdit.value.trim() !== auth.wardName) {
+    await auth.updateWardName(nameEdit.value);
+  }
+}
+
+function cancelNameEdit() {
+  editingName.value = false;
+}
 
 const canvasRef = ref<InstanceType<typeof Canvas> | null>(null);
 
@@ -59,7 +83,36 @@ const isEmptyCanvas = computed(
     <header
       class="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-2"
     >
-      <h1 class="text-base font-semibold">Ministering Assignment Manager</h1>
+      <!-- Ward name — admins can click to rename inline -->
+      <div class="group flex items-center gap-1.5">
+        <input
+          v-if="editingName"
+          ref="nameInput"
+          v-model="nameEdit"
+          class="rounded border border-slate-300 bg-white px-2 py-0.5 text-base font-semibold focus:border-slate-500 focus:outline-none"
+          @blur="saveName"
+          @keydown.enter.prevent="saveName"
+          @keydown.escape.prevent="cancelNameEdit"
+        />
+        <template v-else>
+          <h1
+            class="text-base font-semibold"
+            :class="auth.wardRole === 'admin' ? 'cursor-pointer hover:text-slate-600' : ''"
+            :title="auth.wardRole === 'admin' ? 'Click to rename' : undefined"
+            @click="startNameEdit"
+          >
+            {{ auth.wardName ?? 'My Ward' }}
+          </h1>
+          <button
+            v-if="auth.wardRole === 'admin'"
+            class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-slate-600 transition-opacity text-xs leading-none"
+            title="Rename ward"
+            @click="startNameEdit"
+          >
+            ✎
+          </button>
+        </template>
+      </div>
       <div class="flex items-center gap-2">
         <button
           class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"

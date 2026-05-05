@@ -4,10 +4,15 @@
 
 import { supabase } from '@/lib/supabase';
 import {
+  CARD_H,
   COLS,
+  DISTRICT_HEADER,
+  DISTRICT_INNER_PAD_X,
+  DISTRICT_INNER_PAD_Y,
   DISTRICT_WIDTH,
-  cellTopLeft,
-  districtHeightForCount,
+  ROW_GAP,
+  SORT_KEY_GAP,
+  columnXForIndex,
 } from '@/canvas/layout';
 import type { ParseResult } from './parser';
 
@@ -73,21 +78,31 @@ export async function applyStructure(
   }
 
   // 2) Insert districts. One per parsed.districts, side-by-side columns sized
-  //    to the 2-column grid.
+  //    to the 2-column masonry. Initial height is approximate — the District
+  //    component recomputes it from packed columns once cards mount.
   const districtsByLegacy = new Map<string, string>(); // legacy uuid -> db id
   const districtsToInsert = parsed.districts.map((d, i) => {
     const compsInDistrict = parsed.companionships.filter(
       (c) => c.districtLegacyId === d.legacyId,
     ).length;
+    // Approximate initial height: ceil(N/COLS) rows of default-height cards.
+    const rows = Math.max(1, Math.ceil(compsInDistrict / COLS));
+    const approxHeight =
+      DISTRICT_HEADER +
+      2 * DISTRICT_INNER_PAD_Y +
+      rows * CARD_H +
+      Math.max(0, rows - 1) * ROW_GAP;
     return {
       ward_id: existing.wardId,
       name: d.name,
       position_x: DISTRICT_X0 + i * (DISTRICT_WIDTH + DISTRICT_GAP_X),
       position_y: DISTRICT_Y0,
       width: DISTRICT_WIDTH,
-      height: districtHeightForCount(compsInDistrict),
+      height: approxHeight,
     };
   });
+  // Suppress unused-import lint for DISTRICT_INNER_PAD_X — kept for future use.
+  void DISTRICT_INNER_PAD_X;
 
   let districtsCreated = 0;
   if (districtsToInsert.length) {
@@ -118,8 +133,9 @@ export async function applyStructure(
     if (id) parsedHouseholdIdToDb.set(h.legacyId, id);
   }
 
-  // 4) Insert companionships into the 2-column grid of their district.
+  // 4) Insert companionships into the 2-column masonry of their district.
   //    Layout order: row-major (col 0 row 0, col 1 row 0, col 0 row 1, …).
+  //    For districted cards, position_x = column anchor, position_y = sort key.
   const ordinalInDistrict = new Map<string, number>();
   const compRows = parsed.companionships.map((c) => {
     const districtDbId = c.districtLegacyId ? districtsByLegacy.get(c.districtLegacyId) : null;
@@ -135,14 +151,14 @@ export async function applyStructure(
       position_x: DISTRICT_X0 + districtIdx * (DISTRICT_WIDTH + DISTRICT_GAP_X),
       position_y: DISTRICT_Y0,
     };
-    const col = ord % COLS;
-    const row = Math.floor(ord / COLS);
-    const tl = cellTopLeft(districtPos, col, row);
+    const col = (ord % COLS) as 0 | 1;
+    const ordinalInColumn = Math.floor(ord / COLS);
     return {
       ward_id: existing.wardId,
       district_id: districtDbId ?? null,
-      position_x: tl.x,
-      position_y: tl.y,
+      position_x: columnXForIndex(districtPos, col),
+      // Sort key spaced so future inserts can fit in between.
+      position_y: (ordinalInColumn + 1) * SORT_KEY_GAP,
     };
   });
 

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { computed, onScopeDispose, ref } from 'vue';
+import { computed, onScopeDispose, reactive, ref } from 'vue';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
@@ -25,6 +25,23 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
   let channelComps: RealtimeChannel | null = null;
   let channelElders: RealtimeChannel | null = null;
   let channelHouseholds: RealtimeChannel | null = null;
+
+  /**
+   * Reactive map of companionship id → measured rendered height (px).
+   * Populated by each CompanionshipCard via a ResizeObserver. Used by the
+   * masonry layout to pack cards tight in their columns. Not persisted.
+   */
+  const heightById = reactive(new Map<string, number>());
+
+  function setHeight(id: string, h: number) {
+    // Avoid spurious writes that would re-trigger reactive consumers.
+    if (heightById.get(id) === h) return;
+    heightById.set(id, h);
+  }
+
+  function clearHeight(id: string) {
+    heightById.delete(id);
+  }
 
   const byId = computed(() => new Map(items.value.map((c) => [c.id, c])));
 
@@ -176,6 +193,61 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     if (idx >= 0) items.value[idx] = data;
   }
 
+  /**
+   * Bulk-update position fields for many companionships at once.
+   * Used by masonry renormalization when a column's sort keys collide.
+   * Optimistic: applies to local state immediately, rolls back on DB error.
+   */
+  async function updatePositionsBulk(
+    updates: {
+      id: string;
+      position_x: number;
+      position_y: number;
+      district_id?: string | null;
+    }[],
+  ) {
+    if (!updates.length) return;
+    // Snapshot pre-state for rollback.
+    const snapshot = updates.map((u) => {
+      const cur = items.value.find((c) => c.id === u.id);
+      return cur ? { ...cur } : null;
+    });
+    // Optimistic local apply.
+    for (const u of updates) {
+      const idx = items.value.findIndex((c) => c.id === u.id);
+      if (idx >= 0) {
+        items.value[idx] = {
+          ...items.value[idx],
+          position_x: u.position_x,
+          position_y: u.position_y,
+          ...(u.district_id !== undefined ? { district_id: u.district_id } : {}),
+        };
+      }
+    }
+    // Persist sequentially. Could parallelize with Promise.all but sequential
+    // is fine for a few cards and keeps error handling simple.
+    try {
+      for (const u of updates) {
+        const patch: {
+          position_x: number;
+          position_y: number;
+          district_id?: string | null;
+        } = { position_x: u.position_x, position_y: u.position_y };
+        if (u.district_id !== undefined) patch.district_id = u.district_id;
+        const { error } = await supabase.from('companionships').update(patch).eq('id', u.id);
+        if (error) throw error;
+      }
+    } catch (e) {
+      // Rollback local state.
+      snapshot.forEach((row, i) => {
+        if (!row) return;
+        const idx = items.value.findIndex((c) => c.id === updates[i].id);
+        if (idx >= 0) items.value[idx] = row;
+      });
+      throw e;
+    }
+  }
+
   async function remove(id: string) {
     // Cascade rules in DB drop the link rows; reflect locally too.
     const { error } = await supabase.from('companionships').delete().eq('id', id);
@@ -183,6 +255,7 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     items.value = items.value.filter((c) => c.id !== id);
     elderLinks.value = elderLinks.value.filter((l) => l.companionship_id !== id);
     householdLinks.value = householdLinks.value.filter((l) => l.companionship_id !== id);
+    heightById.delete(id);
   }
 
   /** Move an elder into a companionship (removes from any prior one). */
@@ -262,6 +335,7 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     householdLinks.value = householdLinks.value.filter(
       (l) => !toDissolve.includes(l.companionship_id),
     );
+    for (const id of toDissolve) heightById.delete(id);
   }
 
   return {
@@ -274,9 +348,13 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     eldersInCompanionship,
     householdsInCompanionship,
     loaded,
+    heightById,
+    setHeight,
+    clearHeight,
     fetch,
     create,
     update,
+    updatePositionsBulk,
     remove,
     assignElder,
     unassignElder,

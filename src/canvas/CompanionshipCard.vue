@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useDistrictsStore } from '@/stores/districts';
 import { useEldersStore } from '@/stores/elders';
@@ -11,13 +11,17 @@ import {
 } from '@/lib/validation';
 import { useCardDrag } from './useCardDrag';
 import { useTransfer } from './useTransfer';
+import { useDragPreview } from './dragPreview';
 import {
   CARD_H as LAYOUT_CARD_H,
   CARD_W as LAYOUT_CARD_W,
-  cellOf,
-  cellTopLeft,
-  findFreeCell,
+  columnIndexForX,
+  columnXForIndex,
+  findInsertOrdinalY,
   isPointInDistrict,
+  packColumn,
+  renormalizeColumnSortKeys,
+  renderedPosition,
 } from './layout';
 import AgeBadge from '@/components/AgeBadge.vue';
 import LabelChip from '@/components/LabelChip.vue';
@@ -36,12 +40,20 @@ const elders = useEldersStore();
 const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const transfer = useTransfer();
+const dragPreview = useDragPreview();
 
 const CARD_W = LAYOUT_CARD_W;
 const CARD_H = LAYOUT_CARD_H;
 
+// Live drag state — set by the move drag handler; nullable so the
+// computed render position can fall back to the masonry layout.
 const liveX = ref<number | null>(null);
 const liveY = ref<number | null>(null);
+const dragging = ref(false);
+
+const cardEl = ref<HTMLElement | null>(null);
+
+// ─── Reactive content ──────────────────────────────────────────────────────
 
 const elderIds = computed(
   () => companionships.eldersInCompanionship.get(props.companionship.id) ?? [],
@@ -68,8 +80,81 @@ const warnings = computed(() =>
 );
 const severity = computed(() => highestSeverity(warnings.value));
 
-const x = computed(() => liveX.value ?? props.companionship.position_x);
-const y = computed(() => liveY.value ?? props.companionship.position_y);
+// ─── Render position ───────────────────────────────────────────────────────
+//
+// For free-floating cards (district_id == null), `position_x` / `position_y`
+// are pixel coordinates — render directly.
+//
+// For districted cards, `position_x` encodes column index and `position_y`
+// is a sort key. The actual rendered (x, y) is computed by packing the
+// column with measured heights. If a drag preview is active for this card's
+// district + column, a placeholder is reserved at the projected ordinal.
+
+const district = computed(() =>
+  props.companionship.district_id
+    ? districts.items.find((d) => d.id === props.companionship.district_id) ?? null
+    : null,
+);
+
+const ownColumn = computed<0 | 1 | null>(() => {
+  if (!district.value) return null;
+  return columnIndexForX(district.value, props.companionship.position_x);
+});
+
+const renderedXY = computed(() => {
+  if (liveX.value !== null && liveY.value !== null) {
+    return { x: liveX.value, y: liveY.value };
+  }
+  if (!district.value || ownColumn.value === null) {
+    // Un-districted: pixel coords.
+    return {
+      x: props.companionship.position_x,
+      y: props.companionship.position_y,
+    };
+  }
+  // Districted: pack the column.
+  const d = district.value;
+  const col = ownColumn.value;
+  const colCards = companionships.items
+    .filter(
+      (c) =>
+        c.district_id === d.id && columnIndexForX(d, c.position_x) === col,
+    )
+    .map((c) => ({ id: c.id, position_y: c.position_y }));
+
+  // Inject placeholder slot if the live drag preview targets this column.
+  const preview = dragPreview.state.value;
+  const usePlaceholder =
+    preview &&
+    preview.districtId === d.id &&
+    preview.column === col &&
+    preview.cardId !== props.companionship.id;
+
+  const packed = packColumn(colCards, companionships.heightById, {
+    placeholderOrdinal: usePlaceholder ? preview.ordinal : undefined,
+    placeholderHeight: usePlaceholder ? preview.height : undefined,
+    excludeId: preview?.cardId, // exclude the dragged card from layout
+  });
+  const pos = renderedPosition(d, col, packed, props.companionship.id);
+  if (!pos) {
+    // Fallback (shouldn't happen) — use raw coords.
+    return {
+      x: props.companionship.position_x,
+      y: props.companionship.position_y,
+    };
+  }
+  return pos;
+});
+
+const x = computed(() => renderedXY.value.x);
+const y = computed(() => renderedXY.value.y);
+
+// Card height for layout: prefer measured; fall back to default.
+const measuredHeight = computed(
+  () => companionships.heightById.get(props.companionship.id) ?? CARD_H,
+);
+
+// ─── Visual classes ────────────────────────────────────────────────────────
 
 const isHovered = computed(
   () =>
@@ -85,77 +170,188 @@ const cardClasses = computed(() => {
   return '';
 });
 
-// Move drag — anchor on the card itself but skip if the user grabbed an
-// elder/household chip (those have their own drag for transfers).
-const { makeStart } = useCardDrag(() => props.scale);
-const startMove = makeStart(
-  () => ({ x: props.companionship.position_x, y: props.companionship.position_y }),
-  {
-    shouldStart: (e) => {
-      const t = e.target as HTMLElement;
-      return !t.closest('[data-transfer]');
-    },
-    onLive: (p) => {
-      liveX.value = Math.round(p.x);
-      liveY.value = Math.round(p.y);
-    },
-    onDrop: async (p) => {
-      const fx = Math.round(p.x);
-      const fy = Math.round(p.y);
-      liveX.value = null;
-      liveY.value = null;
-      // Drop test: which district (if any) contains the card's center?
-      const center = { x: fx + CARD_W / 2, y: fy + CARD_H / 2 };
-      const containingDistrict = districts.items.find((d) => isPointInDistrict(center, d));
-      let snappedX = fx;
-      let snappedY = fy;
-      if (containingDistrict) {
-        // Snap to nearest free cell in this district's grid.
-        const preferred = cellOf(containingDistrict, { position_x: fx, position_y: fy });
-        const occupants = companionships.items.filter(
-          (c) => c.district_id === containingDistrict.id,
-        );
-        const cell = findFreeCell(
-          containingDistrict,
-          occupants,
-          preferred,
-          props.companionship.id,
-        );
-        const tl = cellTopLeft(containingDistrict, cell.col, cell.row);
-        snappedX = tl.x;
-        snappedY = tl.y;
-      }
-      const nextDistrictId = containingDistrict?.id ?? null;
-      const patch: { position_x: number; position_y: number; district_id?: string | null } = {
-        position_x: snappedX,
-        position_y: snappedY,
-      };
-      if (nextDistrictId !== props.companionship.district_id) {
-        patch.district_id = nextDistrictId;
-      }
-      await companionships.update(props.companionship.id, patch);
-    },
-  },
+// Smooth transitions for layout shifts; suppressed during this card's own drag.
+const transitionStyle = computed(() =>
+  dragging.value
+    ? 'transition: none'
+    : 'transition: top 150ms ease-out, left 150ms ease-out',
 );
 
+// ─── ResizeObserver — report measured height to the store ──────────────────
+
+let observer: ResizeObserver | null = null;
+
+onMounted(() => {
+  if (!cardEl.value) return;
+  // contentRect.height excludes border/margin; use offsetHeight for true visual.
+  const updateHeight = () => {
+    if (!cardEl.value) return;
+    companionships.setHeight(props.companionship.id, cardEl.value.offsetHeight);
+  };
+  updateHeight();
+  observer = new ResizeObserver(() => {
+    // Use rAF to avoid the "ResizeObserver loop limit exceeded" warning when
+    // measuring elements whose size changes during the same frame.
+    requestAnimationFrame(updateHeight);
+  });
+  observer.observe(cardEl.value);
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+});
+
+// ─── Move drag ─────────────────────────────────────────────────────────────
+
+const { makeStart } = useCardDrag(() => props.scale);
+
+// Initial drag origin — for districted cards, derive from the *current rendered*
+// position so the card stays under the cursor. For free cards, use stored coords.
+function dragOriginPos(): { x: number; y: number } {
+  return { x: x.value, y: y.value };
+}
+
+// Compute and publish the live drag preview based on current pointer (world-space).
+function updatePreview(p: { x: number; y: number }) {
+  const center = { x: p.x + CARD_W / 2, y: p.y + measuredHeight.value / 2 };
+  const target = districts.items.find((d) => isPointInDistrict(center, d));
+  if (!target) {
+    dragPreview.clearPreview();
+    return;
+  }
+  const col = columnIndexForX(target, center.x);
+  const colCards = companionships.items
+    .filter((c) => c.district_id === target.id && columnIndexForX(target, c.position_x) === col)
+    .map((c) => ({ id: c.id, position_y: c.position_y }));
+  const { ordinal } = findInsertOrdinalY(
+    target,
+    colCards,
+    companionships.heightById,
+    center.y,
+    props.companionship.id,
+  );
+  dragPreview.setPreview({
+    cardId: props.companionship.id,
+    districtId: target.id,
+    column: col,
+    ordinal,
+    height: measuredHeight.value,
+  });
+}
+
+const startMove = makeStart(dragOriginPos, {
+  shouldStart: (e) => {
+    const t = e.target as HTMLElement;
+    return !t.closest('[data-transfer]');
+  },
+  onLive: (p) => {
+    dragging.value = true;
+    liveX.value = Math.round(p.x);
+    liveY.value = Math.round(p.y);
+    updatePreview(p);
+  },
+  onCancel: () => {
+    dragging.value = false;
+    liveX.value = null;
+    liveY.value = null;
+    dragPreview.clearPreview();
+  },
+  onDrop: async (p) => {
+    const fx = Math.round(p.x);
+    const fy = Math.round(p.y);
+    const measuredH = measuredHeight.value;
+
+    // Drop test: which district (if any) contains the card's center?
+    const center = { x: fx + CARD_W / 2, y: fy + measuredH / 2 };
+    const containingDistrict = districts.items.find((d) => isPointInDistrict(center, d));
+
+    try {
+      if (!containingDistrict) {
+        // Drop into free canvas — pixel coords, no district.
+        await companionships.update(props.companionship.id, {
+          position_x: fx,
+          position_y: fy,
+          ...(props.companionship.district_id !== null ? { district_id: null } : {}),
+        });
+      } else {
+        // Districted drop — snap to column + insert ordinal.
+        const col = columnIndexForX(containingDistrict, center.x);
+        const colCards = companionships.items
+          .filter(
+            (c) =>
+              c.district_id === containingDistrict.id &&
+              columnIndexForX(containingDistrict, c.position_x) === col,
+          )
+          .map((c) => ({ id: c.id, position_y: c.position_y }));
+
+        const insert = findInsertOrdinalY(
+          containingDistrict,
+          colCards,
+          companionships.heightById,
+          center.y,
+          props.companionship.id,
+        );
+
+        const newPosX = columnXForIndex(containingDistrict, col);
+        const districtChanged =
+          props.companionship.district_id !== containingDistrict.id;
+
+        if (insert.needsRenormalize) {
+          // Renormalize the entire target column with this card spliced in.
+          const renorm = renormalizeColumnSortKeys(colCards, {
+            id: props.companionship.id,
+            atOrdinal: insert.ordinal,
+            excludeId: props.companionship.id,
+          });
+          const updates = renorm.map((r) => {
+            if (r.id === props.companionship.id) {
+              return {
+                id: r.id,
+                position_x: newPosX,
+                position_y: r.position_y,
+                district_id: containingDistrict.id,
+              };
+            }
+            return {
+              id: r.id,
+              position_x: columnXForIndex(containingDistrict, col),
+              position_y: r.position_y,
+            };
+          });
+          await companionships.updatePositionsBulk(updates);
+        } else {
+          await companionships.update(props.companionship.id, {
+            position_x: newPosX,
+            position_y: insert.sortY,
+            ...(districtChanged ? { district_id: containingDistrict.id } : {}),
+          });
+        }
+      }
+    } finally {
+      // Clear live drag state AFTER the persist completes so the card
+      // doesn't briefly snap to its old computed position before the new
+      // one arrives in the store.
+      liveX.value = null;
+      liveY.value = null;
+      dragging.value = false;
+      dragPreview.clearPreview();
+    }
+  },
+});
 </script>
 
 <template>
   <div
-    class="absolute flex flex-col overflow-hidden rounded-2xl bg-stone-100 shadow-md select-none"
+    ref="cardEl"
+    class="absolute flex flex-col overflow-hidden rounded-2xl bg-stone-100 shadow-lg select-none"
     :class="cardClasses"
-    :style="{
-      left: x + 'px',
-      top: y + 'px',
-      width: CARD_W + 'px',
-      minHeight: CARD_H + 'px',
-    }"
+    :style="`left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
     data-card
     data-bbox
     :data-x="x"
     :data-y="y"
     :data-w="CARD_W"
-    :data-h="CARD_H"
+    :data-h="measuredHeight"
     data-drop-zone="companionship"
     :data-companionship-id="companionship.id"
     @pointerenter="transfer.setHover('companionship', companionship.id)"

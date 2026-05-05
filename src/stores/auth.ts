@@ -7,6 +7,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
   const session = ref<Session | null>(null);
   const wardId = ref<string | null>(null);
+  const wardRole = ref<'admin' | 'member' | null>(null);
   const ready = ref(false);
 
   async function init() {
@@ -20,27 +21,19 @@ export const useAuthStore = defineStore('auth', () => {
       session.value = s;
       user.value = s?.user ?? null;
       if (user.value) await loadWard();
-      else wardId.value = null;
+      else { wardId.value = null; wardRole.value = null; }
     });
   }
 
   async function loadWard() {
-    const { data, error } = await supabase
-      .from('wards')
-      .select('id')
+    const { data } = await supabase
+      .from('ward_members')
+      .select('ward_id, role')
+      .eq('user_id', user.value!.id)
       .limit(1)
       .single();
-    if (error) {
-      // First sign-in: trigger should have created the ward, but tolerate a race.
-      const inserted = await supabase
-        .from('wards')
-        .insert({ user_id: user.value!.id })
-        .select('id')
-        .single();
-      wardId.value = inserted.data?.id ?? null;
-      return;
-    }
-    wardId.value = data.id;
+    wardId.value = data?.ward_id ?? null;
+    wardRole.value = (data?.role as 'admin' | 'member') ?? null;
   }
 
   async function signIn(email: string, password: string) {
@@ -57,5 +50,5 @@ export const useAuthStore = defineStore('auth', () => {
     await supabase.auth.signOut();
   }
 
-  return { user, session, wardId, ready, init, signIn, signUp, signOut };
+  return { user, session, wardId, wardRole, ready, init, signIn, signUp, signOut };
 });

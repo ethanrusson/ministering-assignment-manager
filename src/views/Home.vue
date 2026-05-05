@@ -9,6 +9,7 @@ import { useCompanionshipsStore } from '@/stores/companionships';
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue';
 import LabelsModal from '@/components/LabelsModal.vue';
 import ImportModal from '@/components/ImportModal.vue';
+import WardInviteModal from '@/components/WardInviteModal.vue';
 import Canvas from '@/canvas/Canvas.vue';
 import District from '@/canvas/District.vue';
 import CompanionshipCard from '@/canvas/CompanionshipCard.vue';
@@ -23,6 +24,7 @@ const companionships = useCompanionshipsStore();
 
 const labelsOpen = ref(false);
 const importOpen = ref(false);
+const inviteOpen = ref(false);
 const loading = ref(true);
 
 const canvasRef = ref<InstanceType<typeof Canvas> | null>(null);
@@ -72,6 +74,13 @@ const isEmptyCanvas = computed(
           Import
         </button>
         <button
+          v-if="auth.wardRole === 'admin'"
+          class="rounded border border-slate-300 px-3 py-1 text-sm hover:bg-slate-50"
+          @click="inviteOpen = true"
+        >
+          Invite
+        </button>
+        <button
           class="rounded border border-slate-500 px-3 py-1 text-sm bg-slate-100 hover:bg-slate-200"
           @click="signOut"
         >
@@ -80,9 +89,9 @@ const isEmptyCanvas = computed(
       </div>
     </header>
 
-    <main class="grid flex-1 grid-cols-[auto_1fr] overflow-hidden">
+    <main>
       <LeftSidebar />
-      <section class="relative overflow-hidden" data-drop-zone="canvas">
+      <section class="h-screen relative overflow-hidden" data-drop-zone="canvas">
         <div
           v-if="loading"
           class="flex h-full items-center justify-center text-sm text-slate-400"
@@ -120,6 +129,7 @@ const isEmptyCanvas = computed(
 
     <LabelsModal :open="labelsOpen" @close="labelsOpen = false" />
     <ImportModal :open="importOpen" @close="importOpen = false" />
+    <WardInviteModal :open="inviteOpen" @close="inviteOpen = false" />
     <TransferGhost />
   </div>
 </template>

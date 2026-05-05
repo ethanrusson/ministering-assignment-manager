@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
+import { subscribeToTable, subscribeToJoinTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
 
 export type Companionship = Database['public']['Tables']['companionships']['Row'];
@@ -20,6 +22,9 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
   const elderLinks = ref<CompanionshipElderLink[]>([]);
   const householdLinks = ref<CompanionshipHouseholdLink[]>([]);
   const loaded = ref(false);
+  let channelComps: RealtimeChannel | null = null;
+  let channelElders: RealtimeChannel | null = null;
+  let channelHouseholds: RealtimeChannel | null = null;
 
   const byId = computed(() => new Map(items.value.map((c) => [c.id, c])));
 
@@ -66,7 +71,54 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     elderLinks.value = el ?? [];
     householdLinks.value = hl ?? [];
     loaded.value = true;
+
+    const auth = useAuthStore();
+    if (auth.wardId) {
+      channelComps?.unsubscribe();
+      channelElders?.unsubscribe();
+      channelHouseholds?.unsubscribe();
+
+      channelComps = subscribeToTable('companionships', auth.wardId, items);
+
+      channelElders = subscribeToJoinTable('companionship_elders', auth.wardId, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new as unknown as CompanionshipElderLink;
+          if (!elderLinks.value.some(
+            (l) => l.companionship_id === row.companionship_id && l.elder_id === row.elder_id,
+          )) {
+            elderLinks.value.push(row);
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const old = payload.old as unknown as Partial<CompanionshipElderLink>;
+          elderLinks.value = elderLinks.value.filter(
+            (l) => !(l.companionship_id === old.companionship_id && l.elder_id === old.elder_id),
+          );
+        }
+      });
+
+      channelHouseholds = subscribeToJoinTable('companionship_households', auth.wardId, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new as unknown as CompanionshipHouseholdLink;
+          if (!householdLinks.value.some(
+            (l) => l.companionship_id === row.companionship_id && l.household_id === row.household_id,
+          )) {
+            householdLinks.value.push(row);
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const old = payload.old as unknown as Partial<CompanionshipHouseholdLink>;
+          householdLinks.value = householdLinks.value.filter(
+            (l) => !(l.companionship_id === old.companionship_id && l.household_id === old.household_id),
+          );
+        }
+      });
+    }
   }
+
+  onScopeDispose(() => {
+    channelComps?.unsubscribe();
+    channelElders?.unsubscribe();
+    channelHouseholds?.unsubscribe();
+  });
 
   async function create(input: {
     elderIds: string[];

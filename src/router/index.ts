@@ -3,12 +3,14 @@ import { useAuthStore } from '@/stores/auth';
 
 const Home = () => import('@/views/Home.vue');
 const Login = () => import('@/views/Login.vue');
+const Join = () => import('@/views/Join.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'home', component: Home, meta: { requiresAuth: true } },
     { path: '/login', name: 'login', component: Login },
+    { path: '/join', name: 'join', component: Join },
     { path: '/:pathMatch(.*)*', redirect: '/login' },
   ],
 });

@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
+import { subscribeToTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
 
 export type Elder = Database['public']['Tables']['elders']['Row'];
@@ -9,6 +11,7 @@ export type Elder = Database['public']['Tables']['elders']['Row'];
 export const useEldersStore = defineStore('elders', () => {
   const items = ref<Elder[]>([]);
   const loaded = ref(false);
+  let channel: RealtimeChannel | null = null;
 
   const visible = computed(() => items.value.filter((e) => !e.hidden));
   const byId = computed(() => new Map(items.value.map((e) => [e.id, e])));
@@ -21,7 +24,17 @@ export const useEldersStore = defineStore('elders', () => {
     if (error) throw error;
     items.value = data ?? [];
     loaded.value = true;
+
+    const auth = useAuthStore();
+    if (auth.wardId) {
+      channel?.unsubscribe();
+      channel = subscribeToTable('elders', auth.wardId, items, {
+        onInsert: () => sortItems(),
+      });
+    }
   }
+
+  onScopeDispose(() => { channel?.unsubscribe(); });
 
   async function add(name: string, age: number | null) {
     const auth = useAuthStore();

@@ -5,13 +5,13 @@
 // dropped inside a district snap to the nearest free grid cell. Companionships
 // outside any district are positioned freely.
 
-export const CARD_W = 320;
+export const CARD_W = 400;
 // Collapsed card slot height: title row (~36) + 2 rows of elder chips (~52)
 // + vertical padding (~16). Rendered card pins to this via min-height/height
 // in CompanionshipCard.vue so the grid stays aligned even when chips wrap.
 export const CARD_H = 180;
-export const COL_GAP = 12;
-export const ROW_GAP = 12;
+export const COL_GAP = 16;
+export const ROW_GAP = 16;
 export const DISTRICT_INNER_PAD_X = 16;
 export const DISTRICT_INNER_PAD_Y = 16;
 export const DISTRICT_HEADER = 36; // matches the .h-9 title bar in District.vue

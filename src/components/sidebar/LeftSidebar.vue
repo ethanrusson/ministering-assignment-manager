@@ -162,11 +162,11 @@ const householdsHovered = computed(
     during the width transition without clipping the button.
   -->
   <div
-    class="relative h-full flex-shrink-0 transition-[width] duration-200"
+    class="fixed h-full flex-shrink-0 transition-[width] duration-200 border border-slate-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
     :class="sidebarOpen ? 'w-[320px]' : 'w-3'"
   >
     <!-- Content pane (clips at the wrapper boundary) -->
-    <div class="absolute inset-0 flex flex-col overflow-hidden border-r border-slate-200 bg-white">
+    <div class="absolute inset-0 flex flex-col overflow-hidden">
       <template v-if="sidebarOpen">
     <!-- ── Elders section ──────────────────────────────────────────────── -->
     <div

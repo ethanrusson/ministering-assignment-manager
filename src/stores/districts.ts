@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
+import { subscribeToTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
 
 export type District = Database['public']['Tables']['districts']['Row'];
@@ -9,6 +11,7 @@ export type District = Database['public']['Tables']['districts']['Row'];
 export const useDistrictsStore = defineStore('districts', () => {
   const items = ref<District[]>([]);
   const loaded = ref(false);
+  let channel: RealtimeChannel | null = null;
   const byId = computed(() => new Map(items.value.map((d) => [d.id, d])));
 
   async function fetch() {
@@ -19,7 +22,15 @@ export const useDistrictsStore = defineStore('districts', () => {
     if (error) throw error;
     items.value = data ?? [];
     loaded.value = true;
+
+    const auth = useAuthStore();
+    if (auth.wardId) {
+      channel?.unsubscribe();
+      channel = subscribeToTable('districts', auth.wardId, items);
+    }
   }
+
+  onScopeDispose(() => { channel?.unsubscribe(); });
 
   async function add(input: {
     name: string;

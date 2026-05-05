@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
+import { subscribeToTable, subscribeToJoinTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
 
 export type Household = Database['public']['Tables']['households']['Row'];
@@ -15,6 +17,8 @@ export const useHouseholdsStore = defineStore('households', () => {
   const items = ref<Household[]>([]);
   const labelLinks = ref<HouseholdLabel[]>([]);
   const loaded = ref(false);
+  let channelHouseholds: RealtimeChannel | null = null;
+  let channelLabels: RealtimeChannel | null = null;
 
   const visible = computed(() => items.value.filter((h) => !h.hidden));
   const byId = computed(() => new Map(items.value.map((h) => [h.id, h])));
@@ -38,7 +42,39 @@ export const useHouseholdsStore = defineStore('households', () => {
     items.value = hh ?? [];
     labelLinks.value = hl ?? [];
     loaded.value = true;
+
+    const auth = useAuthStore();
+    if (auth.wardId) {
+      channelHouseholds?.unsubscribe();
+      channelLabels?.unsubscribe();
+
+      channelHouseholds = subscribeToTable('households', auth.wardId, items, {
+        onInsert: () => sortItems(),
+      });
+
+      // household_labels has no ward_id column — use join table helper
+      channelLabels = subscribeToJoinTable('household_labels', auth.wardId, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new as unknown as HouseholdLabel;
+          if (!labelLinks.value.some(
+            (l) => l.household_id === row.household_id && l.label_id === row.label_id,
+          )) {
+            labelLinks.value.push(row);
+          }
+        } else if (payload.eventType === 'DELETE') {
+          const old = payload.old as unknown as Partial<HouseholdLabel>;
+          labelLinks.value = labelLinks.value.filter(
+            (l) => !(l.household_id === old.household_id && l.label_id === old.label_id),
+          );
+        }
+      });
+    }
   }
+
+  onScopeDispose(() => {
+    channelHouseholds?.unsubscribe();
+    channelLabels?.unsubscribe();
+  });
 
   async function add(name: string) {
     const auth = useAuthStore();

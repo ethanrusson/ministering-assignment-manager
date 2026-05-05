@@ -1,5 +1,5 @@
 // Hand-written until `supabase gen types typescript` is wired up.
-// Mirrors supabase/migrations/0001_init.sql.
+// Mirrors supabase/migrations/0001_init.sql + 0002_multi_user.sql.
 // Conforms to @supabase/postgrest-js GenericDatabase: each table needs
 // Row / Insert / Update / Relationships ([] is fine for v1).
 
@@ -28,6 +28,45 @@ export type Database = {
         Row: { id: string; user_id: string; name: string; created_at: string };
         Insert: { id?: string; user_id: string; name?: string; created_at?: string };
         Update: { id?: string; user_id?: string; name?: string; created_at?: string };
+        Relationships: EmptyRel;
+      };
+      ward_members: {
+        Row: { ward_id: string; user_id: string; role: string; created_at: string };
+        Insert: { ward_id: string; user_id: string; role?: string; created_at?: string };
+        Update: { ward_id?: string; user_id?: string; role?: string; created_at?: string };
+        Relationships: EmptyRel;
+      };
+      ward_invites: {
+        Row: {
+          id: string;
+          ward_id: string;
+          email: string;
+          token: string;
+          created_by: string;
+          created_at: string;
+          expires_at: string;
+          accepted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          ward_id: string;
+          email: string;
+          token?: string;
+          created_by: string;
+          created_at?: string;
+          expires_at?: string;
+          accepted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          ward_id?: string;
+          email?: string;
+          token?: string;
+          created_by?: string;
+          created_at?: string;
+          expires_at?: string;
+          accepted_at?: string | null;
+        };
         Relationships: EmptyRel;
       };
       elders: {
@@ -203,7 +242,12 @@ export type Database = {
       };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      accept_invite: {
+        Args: { p_token: string };
+        Returns: string; // ward_id uuid
+      };
+    };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
   };

@@ -58,12 +58,23 @@ onMounted(async () => {
   inviteEmail.value = data.email;
   email.value = data.email; // Pre-fill email in sign-up form
 
-  // If already signed in, join immediately
+  // If already signed in (or returning after email confirmation which puts a
+  // session in the URL hash that Supabase auto-detects), join immediately.
   if (!auth.ready) await auth.init();
   if (auth.user) {
     await joinWard();
     return;
   }
+
+  // Also watch for session arrival after email confirmation redirect.
+  // Supabase fires onAuthStateChange with SIGNED_IN when it parses the hash.
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+      subscription.unsubscribe();
+      auth.user = session.user as unknown as typeof auth.user; // keep store in sync
+      await joinWard();
+    }
+  });
 
   status.value = 'valid';
 });
@@ -95,24 +106,31 @@ async function signUpAndJoin() {
 
   formLoading.value = true;
   try {
-    // Sign up with skip_auto_ward so the DB trigger does not create a second ward
+    // Sign up with skip_auto_ward so the DB trigger does not create a second ward.
+    // emailRedirectTo sends the confirmation link back to this same /join?token=…
+    // URL so the token is preserved after the user clicks "Confirm email".
     const { error: signUpError } = await supabase.auth.signUp({
       email: email.value.trim(),
       password: password.value,
       options: {
         data: { skip_auto_ward: true },
+        emailRedirectTo: `${window.location.origin}/join?token=${token}`,
       },
     });
     if (signUpError) throw signUpError;
 
-    // Sign in immediately (Supabase may auto-confirm in dev, or require email confirm)
+    // Try to sign in immediately — works when email confirmation is disabled.
+    // If confirmation is required, signInWithPassword returns an error and we
+    // show a "check your email" message. After confirmation Supabase redirects
+    // back here, onMounted detects the session and calls joinWard() automatically.
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.value.trim(),
       password: password.value,
     });
     if (signInError) {
+      status.value = 'valid'; // keep form visible but unfrozen
       formError.value =
-        'Account created — please check your email to confirm before signing in.';
+        'Check your email for a confirmation link, then come back here automatically.';
       formLoading.value = false;
       return;
     }

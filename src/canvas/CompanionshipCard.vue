@@ -203,7 +203,7 @@ async function removeHousehold(householdId: string) {
         <li
           v-for="h in householdRows"
           :key="h.id"
-          class="group flex items-center gap-1 text-xs"
+          class="group flex items-center gap-4 text-s"
           data-transfer
           :data-transfer-kind="'household'"
           :data-transfer-id="h.id"

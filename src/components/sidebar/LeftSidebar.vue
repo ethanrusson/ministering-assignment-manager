@@ -162,8 +162,8 @@ const householdsHovered = computed(
     during the width transition without clipping the button.
   -->
   <div
-    class="fixed h-full flex-shrink-0 transition-[width] duration-200 border border-stone-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
-    :class="sidebarOpen ? 'w-[320px]' : 'w-3'"
+    class="fixed h-[calc(100%-79px)] flex-shrink-0 transition-[width] duration-200 border border-stone-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
+    :class="sidebarOpen ? 'w-[320px]' : 'w-0'"
   >
     <!-- Content pane (clips at the wrapper boundary) -->
     <div class="absolute inset-0 flex flex-col overflow-hidden">
@@ -428,7 +428,7 @@ const householdsHovered = computed(
 
     <!-- Floating toggle: 24×24, centered vertically on the right border -->
     <button
-      class="absolute -right-3 top-1/2 z-10 flex h-6 w-6 -transtone-y-1/2 items-center justify-center rounded-full border border-stone-300 bg-white text-xs text-stone-400 shadow-sm hover:bg-stone-50 hover:text-stone-600"
+      class="absolute -right-3 top-1/2 -translate-y-3 z-10 flex h-6 w-6 -transtone-y-1/2 items-center justify-center rounded-full border border-stone-300 bg-white text-xs text-stone-400 shadow-sm hover:bg-stone-50 hover:text-stone-600"
       :title="sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
       @click="sidebarOpen = !sidebarOpen"
       @pointerdown.stop

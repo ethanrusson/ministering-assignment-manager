@@ -173,8 +173,6 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
       if (e) throw e;
       elderLinks.value.push(...links);
     }
-    // Auto-dissolve any prior companionships left with <2 elders
-    await dissolveSingletonCompanionships();
     return comp;
   }
 
@@ -272,7 +270,6 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
       .insert({ companionship_id: companionshipId, elder_id: elderId });
     if (e2) throw e2;
     elderLinks.value.push({ companionship_id: companionshipId, elder_id: elderId });
-    await dissolveSingletonCompanionships();
   }
 
   /** Remove an elder from any companionship. */
@@ -283,7 +280,6 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
       .eq('elder_id', elderId);
     if (error) throw error;
     elderLinks.value = elderLinks.value.filter((l) => l.elder_id !== elderId);
-    await dissolveSingletonCompanionships();
   }
 
   async function assignHousehold(householdId: string, companionshipId: string) {
@@ -308,34 +304,6 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
       .eq('household_id', householdId);
     if (error) throw error;
     householdLinks.value = householdLinks.value.filter((l) => l.household_id !== householdId);
-  }
-
-  /** Any companionship with 0 or 1 elder is dissolved.
-   *  A surviving 1-elder companionship would be ambiguous — we let the lone
-   *  elder become "stranded" on the canvas instead (handled at render time:
-   *  a non-companionship elder card with a position).
-   *  v1 simplification: we just delete the empty/singleton row; the elder
-   *  returns to the unassigned sidebar. UX-stranded behavior arrives later.
-   */
-  async function dissolveSingletonCompanionships() {
-    const counts = new Map<string, number>();
-    for (const l of elderLinks.value) {
-      counts.set(l.companionship_id, (counts.get(l.companionship_id) ?? 0) + 1);
-    }
-    const toDissolve = items.value
-      .map((c) => c.id)
-      .filter((id) => (counts.get(id) ?? 0) < 2);
-    if (!toDissolve.length) return;
-    const { error } = await supabase.from('companionships').delete().in('id', toDissolve);
-    if (error) throw error;
-    items.value = items.value.filter((c) => !toDissolve.includes(c.id));
-    elderLinks.value = elderLinks.value.filter(
-      (l) => !toDissolve.includes(l.companionship_id),
-    );
-    householdLinks.value = householdLinks.value.filter(
-      (l) => !toDissolve.includes(l.companionship_id),
-    );
-    for (const id of toDissolve) heightById.delete(id);
   }
 
   return {

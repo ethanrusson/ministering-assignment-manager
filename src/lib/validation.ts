@@ -33,7 +33,7 @@ export function validateCompanionship(
   if (c.elders.length < 2) {
     out.push({
       rule: 'singleton',
-      severity: 'warn',
+      severity: 'danger',
       message: 'Companionship has fewer than 2 elders.',
     });
   }

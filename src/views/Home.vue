@@ -14,6 +14,8 @@ import Canvas from '@/canvas/Canvas.vue';
 import District from '@/canvas/District.vue';
 import CompanionshipCard from '@/canvas/CompanionshipCard.vue';
 import TransferGhost from '@/canvas/TransferGhost.vue';
+import { useSnapshot } from '@/canvas/useSnapshot';
+import ChangesModal from '@/components/ChangesModal.vue';
 
 const auth = useAuthStore();
 const elders = useEldersStore();
@@ -22,10 +24,23 @@ const labels = useLabelsStore();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 
+const snap = useSnapshot();
+
 const labelsOpen = ref(false);
 const importOpen = ref(false);
 const inviteOpen = ref(false);
+const changesOpen = ref(false);
 const loading = ref(true);
+
+async function saveCurrentSnapshot() {
+  if (!auth.wardId) return;
+  await snap.saveSnapshot(auth.wardId, companionships.elderLinks, companionships.householdLinks);
+}
+
+async function clearCurrentSnapshot() {
+  if (!auth.wardId) return;
+  await snap.clearSnapshot(auth.wardId);
+}
 
 // Ward name inline edit
 const editingName = ref(false);
@@ -62,6 +77,8 @@ onMounted(async () => {
       districts.fetch(),
       companionships.fetch(),
     ]);
+    // Load the ward's shared baseline snapshot (if one has been saved).
+    if (auth.wardId) await snap.loadSnapshot(auth.wardId);
   } finally {
     loading.value = false;
   }
@@ -114,6 +131,39 @@ const isEmptyCanvas = computed(
         </template>
       </div>
       <div class="flex items-center gap-2">
+        <!-- Snapshot controls — active state when a snapshot is saved -->
+        <div v-if="snap.hasSnapshot.value" class="flex items-center gap-1">
+          <button
+            class="rounded border border-blue-300 bg-blue-100 px-3 py-1 text-sm text-blue-700 hover:bg-blue-200"
+            title="Replace the current snapshot with the latest state"
+            @click="saveCurrentSnapshot"
+          >
+            Update Snapshot
+          </button>
+          <button
+            class="rounded border border-blue-300 bg-blue-100 px-1.5 py-1 text-sm text-blue-500 hover:bg-blue-200"
+            title="Clear snapshot"
+            @click="clearCurrentSnapshot"
+          >
+            ×
+          </button>
+        </div>
+        <button
+          v-else
+          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
+          title="Save the current assignment state as a baseline for change tracking"
+          @click="saveCurrentSnapshot"
+        >
+          Save Snapshot
+        </button>
+        <!-- Changes button — only visible when a snapshot is active -->
+        <button
+          v-if="snap.hasSnapshot.value"
+          class="rounded border border-blue-300 bg-blue-50 px-3 py-1 text-sm text-blue-700 hover:bg-blue-100"
+          @click="changesOpen = true"
+        >
+          Changes
+        </button>
         <button
           class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
           @click="labelsOpen = true"
@@ -183,6 +233,7 @@ const isEmptyCanvas = computed(
     <LabelsModal :open="labelsOpen" @close="labelsOpen = false" />
     <ImportModal :open="importOpen" @close="importOpen = false" />
     <WardInviteModal :open="inviteOpen" @close="inviteOpen = false" />
+    <ChangesModal :open="changesOpen" @close="changesOpen = false" />
     <TransferGhost />
   </div>
 </template>

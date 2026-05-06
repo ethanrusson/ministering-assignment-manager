@@ -12,6 +12,7 @@ import {
 import { useCardDrag } from './useCardDrag';
 import { useTransfer } from './useTransfer';
 import { useDragPreview } from './dragPreview';
+import { useSnapshot } from './useSnapshot';
 import {
   CARD_H as LAYOUT_CARD_H,
   CARD_W as LAYOUT_CARD_W,
@@ -41,6 +42,7 @@ const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const transfer = useTransfer();
 const dragPreview = useDragPreview();
+const snap = useSnapshot();
 
 const CARD_W = LAYOUT_CARD_W;
 const CARD_H = LAYOUT_CARD_H;
@@ -79,6 +81,55 @@ const warnings = computed(() =>
   }),
 );
 const severity = computed(() => highestSeverity(warnings.value));
+
+// ─── Snapshot diff ─────────────────────────────────────────────────────────
+
+const snapshotElderIds = computed((): Set<string> | null => {
+  if (!snap.snapshot.value) return null;
+  return new Set(
+    snap.snapshot.value.elderLinks
+      .filter((l) => l.companionship_id === props.companionship.id)
+      .map((l) => l.elder_id),
+  );
+});
+
+const snapshotHouseholdIds = computed((): Set<string> | null => {
+  if (!snap.snapshot.value) return null;
+  return new Set(
+    snap.snapshot.value.householdLinks
+      .filter((l) => l.companionship_id === props.companionship.id)
+      .map((l) => l.household_id),
+  );
+});
+
+/** True when the card's elder/household membership differs from the snapshot. */
+const hasChanges = computed(() => {
+  const sE = snapshotElderIds.value;
+  const sH = snapshotHouseholdIds.value;
+  if (!sE || !sH) return false;
+  const currE = new Set(elderIds.value);
+  const currH = new Set(householdIds.value);
+  return (
+    [...currE].some((id) => !sE.has(id)) ||
+    [...sE].some((id) => !currE.has(id)) ||
+    [...currH].some((id) => !sH.has(id)) ||
+    [...sH].some((id) => !currH.has(id))
+  );
+});
+
+/** Extra Tailwind classes for an elder chip that was added since the snapshot. */
+function elderClass(elderId: string): string {
+  const sE = snapshotElderIds.value;
+  if (!sE) return '';
+  return !sE.has(elderId) ? 'text-blue-600 italic' : '';
+}
+
+/** Extra Tailwind classes for a household row that was added since the snapshot. */
+function householdClass(householdId: string): string {
+  const sH = snapshotHouseholdIds.value;
+  if (!sH) return '';
+  return !sH.has(householdId) ? 'text-blue-600 italic' : '';
+}
 
 // ─── Render position ───────────────────────────────────────────────────────
 //
@@ -164,10 +215,11 @@ const isHovered = computed(
 );
 
 const cardClasses = computed(() => {
+  const bgClass = hasChanges.value ? 'bg-blue-50' : 'bg-stone-100';
   if (isHovered.value) return 'ring-2 ring-emerald-400 bg-emerald-50';
-  if (severity.value === 'danger') return 'ring-2 ring-danger-400';
-  if (severity.value === 'warn') return 'ring-2 ring-warn-400';
-  return '';
+  if (severity.value === 'danger') return `${bgClass} ring-2 ring-danger-400`;
+  if (severity.value === 'warn') return `${bgClass} ring-2 ring-warn-400`;
+  return bgClass;
 });
 
 // Smooth transitions for layout shifts; suppressed during this card's own drag.
@@ -343,7 +395,7 @@ const startMove = makeStart(dragOriginPos, {
 <template>
   <div
     ref="cardEl"
-    class="absolute flex flex-col overflow-hidden rounded-2xl bg-stone-100 shadow-lg select-none"
+    class="absolute flex flex-col overflow-hidden rounded-2xl shadow-lg select-none"
     :class="cardClasses"
     :style="`left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
     data-card
@@ -382,7 +434,7 @@ const startMove = makeStart(dragOriginPos, {
           :data-from-companionship="companionship.id"
           @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, companionship.id)"
         >
-          <span class="truncate">{{ elder.name }}</span>
+          <span class="truncate" :class="elderClass(elder.id)">{{ elder.name }}</span>
           <AgeBadge :age="elder.age" />
         </span>
       </div>
@@ -414,7 +466,7 @@ const startMove = makeStart(dragOriginPos, {
             <circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/>
             <circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/>
           </svg>
-          <span class="flex-1 truncate">{{ h.name }}</span>
+          <span class="flex-1 truncate" :class="householdClass(h.id)">{{ h.name }}</span>
           <span class="flex shrink-0 gap-1">
             <LabelChip
               v-for="lid in households.labelsForHousehold.get(h.id) ?? []"

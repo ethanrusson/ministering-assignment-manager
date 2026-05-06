@@ -20,6 +20,7 @@ import {
   DISTRICT_INNER_PAD_X,
   DISTRICT_INNER_PAD_Y,
   DISTRICT_WIDTH,
+  ROW_GAP,
   columnIndexForX,
   columnXForIndex,
   districtRenderHeight,
@@ -96,11 +97,11 @@ const placeholderRect = computed(() => {
     yOffset = 0;
   } else if (p.ordinal >= packed.length) {
     const last = packed[packed.length - 1];
-    yOffset = last.yOffset + last.height + 16; // ROW_GAP
+    yOffset = last.yOffset + last.height + ROW_GAP;
   } else {
     // Real card at index ordinal moved down by p.height + ROW_GAP. Its
     // current yOffset is therefore (placeholder_yOffset + p.height + ROW_GAP).
-    yOffset = packed[p.ordinal].yOffset - p.height - 16;
+    yOffset = packed[p.ordinal].yOffset - p.height - ROW_GAP;
   }
   return {
     left: DISTRICT_INNER_PAD_X + p.column * (CARD_W + COL_GAP),

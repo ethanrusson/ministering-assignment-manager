@@ -17,10 +17,10 @@ export const CARD_W = 400;
 // ResizeObserver has measured an actual card. The card itself can grow
 // taller as content wraps.
 export const CARD_H = 180;
-export const COL_GAP = 16;
-export const ROW_GAP = 16;
-export const DISTRICT_INNER_PAD_X = 16;
-export const DISTRICT_INNER_PAD_Y = 16;
+export const COL_GAP = 32;
+export const ROW_GAP = 32;
+export const DISTRICT_INNER_PAD_X = 32;
+export const DISTRICT_INNER_PAD_Y = 32;
 export const DISTRICT_HEADER = 36; // matches the .h-9 title bar in District.vue
 export const COLS = 2;
 export const DISTRICT_WIDTH =

@@ -16,6 +16,12 @@ import CompanionshipCard from '@/canvas/CompanionshipCard.vue';
 import TransferGhost from '@/canvas/TransferGhost.vue';
 import { useSnapshot } from '@/canvas/useSnapshot';
 import ChangesModal from '@/components/ChangesModal.vue';
+import {
+  TagIcon,
+  ArrowDownTrayIcon,
+  UserPlusIcon,
+  ArrowRightOnRectangleIcon,
+} from '@heroicons/vue/24/outline';
 
 const auth = useAuthStore();
 const elders = useEldersStore();
@@ -164,30 +170,42 @@ const isEmptyCanvas = computed(
         >
           Changes
         </button>
+        <!-- Manage Labels -->
         <button
-          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
+          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
+          title="Manage Labels"
+          aria-label="Manage Labels"
           @click="labelsOpen = true"
         >
-          Manage Labels
+          <TagIcon class="h-4 w-4" />
         </button>
+        <!-- Import -->
         <button
-          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
+          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
+          title="Import"
+          aria-label="Import"
           @click="importOpen = true"
         >
-          Import
+          <ArrowDownTrayIcon class="h-4 w-4" />
         </button>
+        <!-- Invite (admin only) -->
         <button
           v-if="auth.wardRole === 'admin'"
-          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
+          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
+          title="Invite member"
+          aria-label="Invite member"
           @click="inviteOpen = true"
         >
-          Invite
+          <UserPlusIcon class="h-4 w-4" />
         </button>
+        <!-- Sign out -->
         <button
-          class="rounded border border-stone-500 px-3 py-1 text-sm bg-stone-100 hover:bg-stone-200"
+          class="rounded border border-stone-500 bg-stone-100 p-1.5 text-stone-600 hover:bg-stone-200 hover:text-stone-800"
+          title="Sign out"
+          aria-label="Sign out"
           @click="signOut"
         >
-          Sign out
+          <ArrowRightOnRectangleIcon class="h-4 w-4" />
         </button>
       </div>
     </header>

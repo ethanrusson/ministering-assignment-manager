@@ -7,6 +7,17 @@ import { useCompanionshipsStore } from '@/stores/companionships';
 import { useTransfer } from '@/canvas/useTransfer';
 import AgeBadge from '@/components/AgeBadge.vue';
 import LabelChip from '@/components/LabelChip.vue';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronLeftIcon,
+  PencilIcon,
+  HashtagIcon,
+  TagIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  TrashIcon,
+} from '@heroicons/vue/24/outline';
 
 const elders = useEldersStore();
 const households = useHouseholdsStore();
@@ -181,7 +192,10 @@ const householdsHovered = computed(
           @click="eldersOpen = !eldersOpen"
           @pointerdown.stop
         >
-          <span class="text-[10px] text-stone-400">{{ eldersOpen ? '▾' : '▸' }}</span>
+          <component
+            :is="eldersOpen ? ChevronDownIcon : ChevronRightIcon"
+            class="h-3 w-3 text-stone-400"
+          />
           <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-600">
             Unassigned Elders
           </h2>
@@ -252,34 +266,41 @@ const householdsHovered = computed(
           >
             <span class="flex-1 truncate text-sm">{{ elder.name }}</span>
             <AgeBadge :age="elder.age" />
-            <div class="hidden gap-1 group-hover:flex">
+            <div class="hidden gap-0.5 group-hover:flex">
               <button
-                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                 title="Rename"
                 @pointerdown.stop
                 @click="renameElder(elder.id, elder.name)"
-              >✎</button>
+              >
+                <PencilIcon class="h-3.5 w-3.5" />
+              </button>
               <button
-                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                 title="Set age"
                 @pointerdown.stop
                 @click="setElderAge(elder.id, elder.age)"
-              >#</button>
+              >
+                <HashtagIcon class="h-3.5 w-3.5" />
+              </button>
               <button
-                class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                 :title="elder.hidden ? 'Unhide' : 'Hide'"
                 @pointerdown.stop
                 @click="toggleElderHidden(elder.id, elder.hidden)"
-              >{{ elder.hidden ? '◐' : '○' }}</button>
+              >
+                <component
+                  :is="elder.hidden ? EyeSlashIcon : EyeIcon"
+                  class="h-3.5 w-3.5"
+                />
+              </button>
               <button
-                class="rounded p-1 text-stone-400 hover:text-danger-600 hover:bg-danger-50"
+                class="flex h-5 w-5 items-center justify-center rounded text-stone-400 hover:text-danger-600 hover:bg-danger-50"
                 title="Delete"
                 @pointerdown.stop
                 @click="removeElder(elder.id, elder.name)"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                </svg>
+                <TrashIcon class="h-3.5 w-3.5" />
               </button>
             </div>
           </li>
@@ -303,7 +324,10 @@ const householdsHovered = computed(
           @click="householdsOpen = !householdsOpen"
           @pointerdown.stop
         >
-          <span class="text-[10px] text-stone-400">{{ householdsOpen ? '▾' : '▸' }}</span>
+          <component
+            :is="householdsOpen ? ChevronDownIcon : ChevronRightIcon"
+            class="h-3 w-3 text-stone-400"
+          />
           <h2 class="text-sm font-semibold uppercase tracking-wide text-stone-600">
             Unassigned Households
           </h2>
@@ -371,36 +395,43 @@ const householdsHovered = computed(
             :class="h.hidden && 'opacity-50'"
             @pointerdown.stop="transfer.startDrag($event, 'household', h.id, null)"
           >
-            <div class="flex items-center gap-2">
+            <div class="flex h-5 items-center gap-2">
               <span class="flex-1 truncate text-sm">{{ h.name }}</span>
-              <div class="hidden gap-1 group-hover:flex">
+              <div class="hidden gap-0.5 group-hover:flex">
                 <button
-                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                  class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                   title="Rename"
                   @pointerdown.stop
                   @click="renameHousehold(h.id, h.name)"
-                >✎</button>
+                >
+                  <PencilIcon class="h-3.5 w-3.5" />
+                </button>
                 <button
-                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                  class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                   title="Edit labels"
                   @pointerdown.stop
                   @click="editLabels(h.id)"
-                >⌘</button>
+                >
+                  <TagIcon class="h-3.5 w-3.5" />
+                </button>
                 <button
-                  class="rounded p-1 text-xs text-stone-500 hover:bg-stone-100"
+                  class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                   :title="h.hidden ? 'Unhide' : 'Hide'"
                   @pointerdown.stop
                   @click="toggleHouseholdHidden(h.id, h.hidden)"
-                >{{ h.hidden ? '◐' : '○' }}</button>
+                >
+                  <component
+                    :is="h.hidden ? EyeSlashIcon : EyeIcon"
+                    class="h-3.5 w-3.5"
+                  />
+                </button>
                 <button
-                  class="rounded p-1 text-stone-400 hover:text-danger-600 hover:bg-danger-50"
+                  class="flex h-5 w-5 items-center justify-center rounded text-stone-400 hover:text-danger-600 hover:bg-danger-50"
                   title="Delete"
                   @pointerdown.stop
                   @click="removeHousehold(h.id, h.name)"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                  </svg>
+                  <TrashIcon class="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -428,12 +459,15 @@ const householdsHovered = computed(
 
     <!-- Floating toggle: 24×24, centered vertically on the right border -->
     <button
-      class="absolute -right-3 top-1/2 -translate-y-3 z-10 flex h-6 w-6 -transtone-y-1/2 items-center justify-center rounded-full border border-stone-300 bg-white text-xs text-stone-400 shadow-sm hover:bg-stone-50 hover:text-stone-600"
+      class="absolute -right-3 top-1/2 -translate-y-3 z-10 flex h-6 w-6 -transtone-y-1/2 items-center justify-center rounded-full border border-stone-300 bg-white text-stone-400 shadow-sm hover:bg-stone-50 hover:text-stone-600"
       :title="sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'"
       @click="sidebarOpen = !sidebarOpen"
       @pointerdown.stop
     >
-      {{ sidebarOpen ? '‹' : '›' }}
+      <component
+        :is="sidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
+        class="h-3.5 w-3.5"
+      />
     </button>
   </div>
 </template>

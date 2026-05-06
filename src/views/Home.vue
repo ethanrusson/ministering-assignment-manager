@@ -124,7 +124,7 @@ const isEmptyCanvas = computed(
             :title="auth.wardRole === 'admin' ? 'Click to rename' : undefined"
             @click="startNameEdit"
           >
-            {{ auth.wardName ?? 'My Ward' }}
+            {{ auth.wardName ?? 'My Ward' }} - Ministering
           </h1>
           <button
             v-if="auth.wardRole === 'admin'"

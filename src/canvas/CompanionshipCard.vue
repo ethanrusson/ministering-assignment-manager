@@ -26,6 +26,8 @@ import {
 } from './layout';
 import AgeBadge from '@/components/AgeBadge.vue';
 import LabelChip from '@/components/LabelChip.vue';
+import CardContextMenu, { type MenuItem } from './CardContextMenu.vue';
+import { EllipsisVerticalIcon } from '@heroicons/vue/24/outline';
 import type { Database } from '@/types/database';
 
 type CompanionshipRow = Database['public']['Tables']['companionships']['Row'];
@@ -291,6 +293,82 @@ function updatePreview(p: { x: number; y: number }) {
   });
 }
 
+// ─── Context menu ──────────────────────────────────────────────────────────
+
+const menuOpen = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
+
+function openMenuFromButton(e: Event) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  menuX.value = r.right - 200;
+  menuY.value = r.bottom + 4;
+  menuOpen.value = true;
+}
+function openMenuAt(clientX: number, clientY: number) {
+  menuX.value = clientX;
+  menuY.value = clientY;
+  menuOpen.value = true;
+}
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault();
+  openMenuAt(e.clientX, e.clientY);
+}
+
+// Long-press on touch opens the menu (no right-click on iPad).
+let longPressTimer: number | null = null;
+let longPressStart: { x: number; y: number } | null = null;
+function onCardPointerDown(e: PointerEvent) {
+  if (e.pointerType !== 'touch') return;
+  longPressStart = { x: e.clientX, y: e.clientY };
+  if (longPressTimer) window.clearTimeout(longPressTimer);
+  longPressTimer = window.setTimeout(() => {
+    if (longPressStart) openMenuAt(longPressStart.x, longPressStart.y);
+    longPressTimer = null;
+  }, 500);
+}
+function cancelLongPress(e?: PointerEvent) {
+  if (longPressTimer !== null) {
+    if (e && longPressStart) {
+      const dx = e.clientX - longPressStart.x;
+      const dy = e.clientY - longPressStart.y;
+      if (Math.hypot(dx, dy) < 8) return; // movement under threshold — keep timer
+    }
+    window.clearTimeout(longPressTimer);
+    longPressTimer = null;
+    longPressStart = null;
+  }
+}
+
+async function deleteCard() {
+  if (!window.confirm('Delete this card? Its elders and households will return to the "to assign" sections.')) return;
+  await companionships.remove(props.companionship.id);
+}
+async function unassignAllElders() {
+  if (!elderRows.value.length) return;
+  await companionships.unassignAllElders(props.companionship.id);
+}
+async function unassignAllHouseholds() {
+  if (!householdRows.value.length) return;
+  await companionships.unassignAllHouseholds(props.companionship.id);
+}
+
+const menuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = [];
+  if (elderRows.value.length) {
+    items.push({ label: 'Unassign all elders', onClick: unassignAllElders });
+  }
+  if (householdRows.value.length) {
+    items.push({ label: 'Unassign all households', onClick: unassignAllHouseholds });
+  }
+  items.push({ label: 'Delete card', variant: 'danger', onClick: deleteCard });
+  return items;
+});
+
+onBeforeUnmount(() => {
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+});
+
 const startMove = makeStart(dragOriginPos, {
   shouldStart: (e) => {
     const t = e.target as HTMLElement;
@@ -395,8 +473,8 @@ const startMove = makeStart(dragOriginPos, {
 <template>
   <div
     ref="cardEl"
-    class="absolute flex flex-col overflow-hidden rounded-2xl shadow-lg select-none"
-    :class="cardClasses"
+    class="absolute flex flex-col overflow-hidden rounded-2xl border border-stone-200 select-none"
+    :class="[cardClasses, dragging ? 'shadow-lg' : '']"
     :style="`left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
     data-card
     data-bbox
@@ -408,7 +486,24 @@ const startMove = makeStart(dragOriginPos, {
     :data-companionship-id="companionship.id"
     @pointerenter="transfer.setHover('companionship', companionship.id)"
     @pointerleave="transfer.clearHover('companionship', companionship.id)"
+    @contextmenu="onContextMenu"
+    @pointerdown="onCardPointerDown"
+    @pointermove="cancelLongPress"
+    @pointerup="cancelLongPress"
+    @pointercancel="cancelLongPress"
   >
+    <!-- Three-dot menu (top-right) -->
+    <button
+      class="absolute right-1.5 top-1.5 z-10 rounded-md p-1 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700"
+      data-no-pan
+      title="Card actions"
+      aria-label="Card actions"
+      @pointerdown.stop
+      @click.stop="openMenuFromButton"
+    >
+      <EllipsisVerticalIcon class="h-4 w-4" />
+    </button>
+
     <!-- Drag handle — centered on card surface, no background strip -->
     <div
       class="flex shrink-0 cursor-grab items-center justify-center pb-1 pt-2 active:cursor-grabbing"
@@ -478,5 +573,13 @@ const startMove = makeStart(dragOriginPos, {
         </li>
       </ul>
     </div>
+
+    <CardContextMenu
+      :open="menuOpen"
+      :x="menuX"
+      :y="menuY"
+      :items="menuItems"
+      @close="menuOpen = false"
+    />
   </div>
 </template>

@@ -282,6 +282,16 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     elderLinks.value = elderLinks.value.filter((l) => l.elder_id !== elderId);
   }
 
+  /** Remove all elders from the given companionship in one query. */
+  async function unassignAllElders(companionshipId: string) {
+    const { error } = await supabase
+      .from('companionship_elders')
+      .delete()
+      .eq('companionship_id', companionshipId);
+    if (error) throw error;
+    elderLinks.value = elderLinks.value.filter((l) => l.companionship_id !== companionshipId);
+  }
+
   async function assignHousehold(householdId: string, companionshipId: string) {
     const { error: e1 } = await supabase
       .from('companionship_households')
@@ -306,6 +316,18 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     householdLinks.value = householdLinks.value.filter((l) => l.household_id !== householdId);
   }
 
+  /** Remove all households from the given companionship in one query. */
+  async function unassignAllHouseholds(companionshipId: string) {
+    const { error } = await supabase
+      .from('companionship_households')
+      .delete()
+      .eq('companionship_id', companionshipId);
+    if (error) throw error;
+    householdLinks.value = householdLinks.value.filter(
+      (l) => l.companionship_id !== companionshipId,
+    );
+  }
+
   return {
     items,
     elderLinks,
@@ -326,7 +348,9 @@ export const useCompanionshipsStore = defineStore('companionships', () => {
     remove,
     assignElder,
     unassignElder,
+    unassignAllElders,
     assignHousehold,
     unassignHousehold,
+    unassignAllHouseholds,
   };
 });

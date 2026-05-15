@@ -17,6 +17,7 @@
 import { reactive, readonly, ref } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useCompanionshipsStore } from '@/stores/companionships';
+import { pushError } from '@/lib/errorToast';
 import { findFreeSpot } from './autoNudge';
 
 type Kind = 'elder' | 'household';
@@ -97,6 +98,17 @@ function startDrag(
   state.cursorY = e.clientY;
   state.hoveredDropZone = null;
 
+  // Capture the pointer on the source element. On iOS Safari this keeps
+  // pointermove/up firing even when the finger moves far away from the
+  // small source chip. Without this, fast touch drags can be lost mid-flight.
+  const source = e.currentTarget as HTMLElement | null;
+  const capturedId = e.pointerId;
+  try {
+    source?.setPointerCapture?.(capturedId);
+  } catch {
+    /* setPointerCapture can throw if the pointer is already released */
+  }
+
   onMove = (ev) => {
     state.cursorX = ev.clientX;
     state.cursorY = ev.clientY;
@@ -104,6 +116,11 @@ function startDrag(
   };
   onUp = (ev) => {
     const target = findDropZone(ev.clientX, ev.clientY);
+    try {
+      source?.releasePointerCapture?.(capturedId);
+    } catch {
+      /* noop */
+    }
     endListeners();
     if (!target) {
       reset();
@@ -112,6 +129,11 @@ function startDrag(
     void resolveDrop(target);
   };
   onCancel = () => {
+    try {
+      source?.releasePointerCapture?.(capturedId);
+    } catch {
+      /* noop */
+    }
     endListeners();
     reset();
   };
@@ -179,6 +201,7 @@ async function resolveDrop(target: { kind: string; id?: string }) {
   } catch (e: unknown) {
     lastError.value = e instanceof Error ? e.message : 'Transfer failed.';
     console.error('[transfer] failed', e);
+    pushError(e);
   }
 }
 

@@ -175,7 +175,7 @@ void columnXForIndex;
   >
     <!-- Title bar (move handle) -->
     <div
-      class="flex h-9 cursor-move items-center justify-between gap-2 rounded-t-md border-b border-stone-300 bg-stone-200/80 px-3 text-sm font-medium text-stone-700 backdrop-blur"
+      class="flex h-9 cursor-move items-center justify-between gap-2 rounded-t-md border-b border-stone-300 bg-stone-200/80 px-3 text-sm font-medium text-stone-700"
       data-district-handle="move"
       @pointerdown="startMove"
     >

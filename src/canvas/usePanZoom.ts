@@ -99,10 +99,11 @@ export function usePanZoom(wardIdRef: () => string | null) {
     bbox: { x: number; y: number; w: number; h: number },
     screenViewport: { width: number; height: number },
     padding = 80,
+    maxScale: number = ZOOM_MAX,
   ) {
     const availW = Math.max(1, screenViewport.width - padding * 2);
     const availH = Math.max(1, screenViewport.height - padding * 2);
-    const scale = clampZoom(Math.min(availW / bbox.w, availH / bbox.h, ZOOM_MAX));
+    const scale = clampZoom(Math.min(availW / bbox.w, availH / bbox.h, maxScale));
     state.scale = scale;
     state.tx = padding + (availW - bbox.w * scale) / 2 - bbox.x * scale;
     state.ty = padding + (availH - bbox.h * scale) / 2 - bbox.y * scale;

@@ -182,7 +182,15 @@ function fitToContent() {
   );
 }
 
-defineExpose({ fitToContent, reset, zoomIn, zoomOut, viewport });
+/** Center the view on a single world-space bbox at a comfortable zoom level.
+ * Capped at 1× so single-card targets don't blow up to ZOOM_MAX. */
+function zoomToBbox(bbox: { x: number; y: number; w: number; h: number }, padding = 200) {
+  if (!root.value) return;
+  const r = root.value.getBoundingClientRect();
+  fitTo(bbox, { width: r.width, height: r.height }, padding, 1);
+}
+
+defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
 </script>
 
 <template>
@@ -199,7 +207,7 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, viewport });
     <!-- World layer -->
     <div
       class="absolute left-0 top-0"
-      :style="{ transform, transformOrigin: '0 0' }"
+      :style="{ transform, transformOrigin: '0 0', willChange: 'transform' }"
     >
       <slot />
     </div>

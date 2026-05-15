@@ -18,11 +18,25 @@ export const useAuthStore = defineStore('auth', () => {
     if (user.value) await loadWard();
     ready.value = true;
 
-    supabase.auth.onAuthStateChange(async (_event, s) => {
+    // CRITICAL: do NOT await any supabase call inside onAuthStateChange.
+    // The callback fires while supabase-js is holding its internal auth lock
+    // (e.g. inside _recoverAndRefresh after a visibilitychange). Any supabase
+    // call we make here would queue into `pendingInLock`, which the lock
+    // holder is itself waiting to drain — instant deadlock that leaves every
+    // future supabase call hanging silently until the page is reloaded.
+    // Defer the follow-up work onto a fresh task so the lock can release first.
+    supabase.auth.onAuthStateChange((_event, s) => {
       session.value = s;
       user.value = s?.user ?? null;
-      if (user.value) await loadWard();
-      else { wardId.value = null; wardRole.value = null; wardName.value = null; }
+      if (user.value) {
+        setTimeout(() => {
+          void loadWard();
+        }, 0);
+      } else {
+        wardId.value = null;
+        wardRole.value = null;
+        wardName.value = null;
+      }
     });
   }
 

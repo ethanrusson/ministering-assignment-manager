@@ -159,7 +159,7 @@ void columnXForIndex;
 
 <template>
   <div
-    class="absolute rounded-md border-2 border-dashed border-stone-300 bg-stone-200/40"
+    class="absolute rounded-md border-2 border-dashed border-stone-300 bg-stone-200/60"
     :style="{
       left: x + 'px',
       top: y + 'px',

@@ -18,7 +18,6 @@ import { useSnapshot } from '@/canvas/useSnapshot';
 import ChangesModal from '@/components/ChangesModal.vue';
 import SearchBar, { type SearchTarget } from '@/components/SearchBar.vue';
 import ErrorToasts from '@/components/ErrorToasts.vue';
-import DebugPanel from '@/components/DebugPanel.vue';
 import { useConnectionWatcher } from '@/lib/connectionWatcher';
 import {
   TagIcon,
@@ -27,7 +26,11 @@ import {
   DocumentArrowUpIcon,
   UserPlusIcon,
   ArrowRightOnRectangleIcon,
+  Cog6ToothIcon,
+  SparklesIcon,
 } from '@heroicons/vue/24/outline';
+import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
+import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
 import {
   exportWardBackup,
   downloadBackupAsFile,
@@ -73,6 +76,7 @@ async function clearCurrentSnapshot() {
 
 const uploadInput = ref<HTMLInputElement | null>(null);
 const backupBusy = ref(false);
+const cleanUpBusy = ref(false);
 
 async function downloadBackup() {
   if (!auth.wardId || backupBusy.value) return;
@@ -208,6 +212,80 @@ function onWindowKeydown(e: KeyboardEvent) {
   }
 }
 
+// ─── Settings menu (top-nav cog) ───────────────────────────────────────────
+
+const settingsMenuOpen = ref(false);
+const settingsMenuX = ref(0);
+const settingsMenuY = ref(0);
+
+function openSettingsMenu(e: MouseEvent) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  settingsMenuX.value = r.right - 220;
+  settingsMenuY.value = r.bottom + 4;
+  settingsMenuOpen.value = true;
+}
+
+async function cleanUp() {
+  const orphaned = companionships.items.filter((c) => c.district_id === null);
+  const msg = orphaned.length > 0
+    ? `This will unassign ${orphaned.length} card(s) outside any district and reset all district positions. Continue?`
+    : 'This will reset all district positions. Continue?';
+  if (!window.confirm(msg)) return;
+
+  cleanUpBusy.value = true;
+  try {
+    for (const comp of orphaned) {
+      await companionships.unassignAllElders(comp.id);
+      await companionships.unassignAllHouseholds(comp.id);
+      await companionships.remove(comp.id);
+    }
+
+    const sorted = [...districts.items].sort((a, b) => a.name.localeCompare(b.name));
+    for (let i = 0; i < sorted.length; i++) {
+      const district = sorted[i];
+      const newX = 80 + i * (DISTRICT_WIDTH + 40);
+
+      await districts.update(district.id, { position_x: newX, position_y: 80 });
+
+      // Re-layout cards: sort by current sort key, then assign alternating columns with clean spacing.
+      const cards = [...companionships.items.filter((c) => c.district_id === district.id)]
+        .sort((a, b) => a.position_y - b.position_y);
+      if (cards.length > 0) {
+        await companionships.updatePositionsBulk(
+          cards.map((c, ord) => {
+            const col = (ord % 2) as 0 | 1;
+            const ordInCol = Math.floor(ord / 2);
+            return {
+              id: c.id,
+              position_x: newX + DISTRICT_INNER_PAD_X + col * (CARD_W + COL_GAP),
+              position_y: (ordInCol + 1) * SORT_KEY_GAP,
+            };
+          }),
+        );
+      }
+    }
+
+    await nextTick();
+    canvasRef.value?.fitToContent();
+  } finally {
+    cleanUpBusy.value = false;
+  }
+}
+
+const settingsMenuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = [
+    { label: 'Manage Labels', icon: TagIcon, onClick: () => { labelsOpen.value = true; } },
+    { label: 'Import LCR HTML', icon: ArrowDownTrayIcon, onClick: () => { importOpen.value = true; } },
+    { label: 'Clean up canvas', icon: SparklesIcon, onClick: cleanUp },
+    { label: 'Download backup', icon: DocumentArrowDownIcon, onClick: downloadBackup },
+  ];
+  if (auth.wardRole === 'admin') {
+    items.push({ label: 'Upload backup', icon: DocumentArrowUpIcon, onClick: pickBackupFile });
+    items.push({ label: 'Invite member', icon: UserPlusIcon, onClick: () => { inviteOpen.value = true; } });
+  }
+  return items;
+});
+
 onMounted(async () => {
   window.addEventListener('keydown', onWindowKeydown);
   try {
@@ -245,37 +323,37 @@ const isEmptyCanvas = computed(
     <header
       class="flex items-center justify-between border-b border-stone-200 bg-stone-100 px-4 py-2"
     >
-      <!-- Ward name — admins can click to rename inline -->
-      <div class="group flex items-center gap-1.5">
-        <input
-          v-if="editingName"
-          ref="nameInput"
-          v-model="nameEdit"
-          class="rounded border border-stone-300 bg-white px-2 py-0.5 text-base font-semibold focus:border-stone-500 focus:outline-none"
-          @blur="saveName"
-          @keydown.enter.prevent="saveName"
-          @keydown.escape.prevent="cancelNameEdit"
-        />
-        <template v-else>
-          <h1
-            class="text-base font-semibold"
-            :class="auth.wardRole === 'admin' ? 'cursor-pointer hover:text-stone-600' : ''"
-            :title="auth.wardRole === 'admin' ? 'Click to rename' : undefined"
-            @click="startNameEdit"
-          >
-            {{ auth.wardName ?? 'My Ward' }} - Ministering
-          </h1>
-          <button
-            v-if="auth.wardRole === 'admin'"
-            class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-opacity text-xs leading-none"
-            title="Rename ward"
-            @click="startNameEdit"
-          >
-            ✎
-          </button>
-        </template>
-      </div>
-      <div class="flex items-center gap-2">
+      <!-- Left cluster: ward name + snapshot/changes -->
+      <div class="flex items-center gap-3">
+        <div class="group flex items-center gap-1.5">
+          <input
+            v-if="editingName"
+            ref="nameInput"
+            v-model="nameEdit"
+            class="rounded border border-stone-300 bg-white px-2 py-0.5 text-base font-semibold focus:border-stone-500 focus:outline-none"
+            @blur="saveName"
+            @keydown.enter.prevent="saveName"
+            @keydown.escape.prevent="cancelNameEdit"
+          />
+          <template v-else>
+            <h1
+              class="text-base font-semibold"
+              :class="auth.wardRole === 'admin' ? 'cursor-pointer hover:text-stone-600' : ''"
+              :title="auth.wardRole === 'admin' ? 'Click to rename' : undefined"
+              @click="startNameEdit"
+            >
+              {{ auth.wardName ?? 'My Ward' }} - Ministering
+            </h1>
+            <button
+              v-if="auth.wardRole === 'admin'"
+              class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-opacity text-xs leading-none"
+              title="Rename ward"
+              @click="startNameEdit"
+            >
+              ✎
+            </button>
+          </template>
+        </div>
         <!-- Snapshot controls — active state when a snapshot is saved -->
         <div v-if="snap.hasSnapshot.value" class="flex items-center gap-1">
           <button
@@ -309,45 +387,8 @@ const isEmptyCanvas = computed(
         >
           Changes
         </button>
-        <!-- Manage Labels -->
-        <button
-          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
-          title="Manage Labels"
-          aria-label="Manage Labels"
-          @click="labelsOpen = true"
-        >
-          <TagIcon class="h-4 w-4" />
-        </button>
-        <!-- Import LCR HTML -->
-        <button
-          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
-          title="Import LCR HTML"
-          aria-label="Import LCR HTML"
-          @click="importOpen = true"
-        >
-          <ArrowDownTrayIcon class="h-4 w-4" />
-        </button>
-        <!-- Download backup -->
-        <button
-          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
-          title="Download ward backup"
-          aria-label="Download ward backup"
-          :disabled="backupBusy"
-          @click="downloadBackup"
-        >
-          <DocumentArrowDownIcon class="h-4 w-4" />
-        </button>
-        <!-- Upload backup -->
-        <button
-          v-if="auth.wardRole === 'admin'"
-          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
-          title="Upload ward backup (replaces all data)"
-          aria-label="Upload ward backup"
-          :disabled="backupBusy"
-          @click="pickBackupFile"
-        >
-          <DocumentArrowUpIcon class="h-4 w-4" />
-        </button>
+      </div>
+      <div class="flex items-center gap-2">
         <input
           ref="uploadInput"
           type="file"
@@ -355,15 +396,15 @@ const isEmptyCanvas = computed(
           class="hidden"
           @change="onBackupFileChosen"
         />
-        <!-- Invite (admin only) -->
+        <!-- Settings (combines Labels, Import, Download/Upload backup, Invite) -->
         <button
-          v-if="auth.wardRole === 'admin'"
-          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
-          title="Invite member"
-          aria-label="Invite member"
-          @click="inviteOpen = true"
+          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
+          title="Settings"
+          aria-label="Settings"
+          :disabled="backupBusy || cleanUpBusy"
+          @click="openSettingsMenu"
         >
-          <UserPlusIcon class="h-4 w-4" />
+          <Cog6ToothIcon class="h-4 w-4" :class="cleanUpBusy ? 'animate-spin' : ''" />
         </button>
         <!-- Sign out -->
         <button
@@ -425,8 +466,14 @@ const isEmptyCanvas = computed(
     <ImportModal :open="importOpen" @close="importOpen = false" />
     <WardInviteModal :open="inviteOpen" @close="inviteOpen = false" />
     <ChangesModal :open="changesOpen" @close="changesOpen = false" />
+    <CardContextMenu
+      :open="settingsMenuOpen"
+      :x="settingsMenuX"
+      :y="settingsMenuY"
+      :items="settingsMenuItems"
+      @close="settingsMenuOpen = false"
+    />
     <TransferGhost />
     <ErrorToasts />
-    <DebugPanel />
   </div>
 </template>

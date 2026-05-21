@@ -473,7 +473,7 @@ const startMove = makeStart(dragOriginPos, {
 <template>
   <div
     ref="cardEl"
-    class="absolute flex flex-col overflow-hidden rounded-2xl border border-stone-200 select-none"
+    class="absolute flex flex-col overflow-hidden rounded-2xl border-2 border-stone-400/40 select-none"
     :class="[cardClasses, dragging ? 'shadow-lg' : '']"
     :style="`left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
     data-card

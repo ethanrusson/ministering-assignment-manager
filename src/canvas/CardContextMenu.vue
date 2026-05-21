@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// Floating menu popover for a companionship card. Teleported to body so it
-// can render above the card's overflow:hidden clip.
+// Floating menu popover. Teleported to body so it can render above any
+// overflow:hidden clip from its anchor.
 //
 // Position is given in screen pixels. The menu auto-flips against viewport
 // edges so it never spills off-screen.
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 
 export interface MenuItem {
   label: string;
+  /** Optional icon component (e.g. a Heroicon) rendered to the left of the label. */
+  icon?: Component;
   /** Tailwind class for an optional accent (e.g. 'text-danger-600'). */
   variant?: 'default' | 'danger';
   onClick: () => void | Promise<void>;
@@ -95,11 +97,12 @@ async function pick(item: MenuItem) {
       <button
         v-for="(item, i) in items"
         :key="i"
-        class="block w-full px-3 py-1.5 text-left text-sm hover:bg-stone-100"
+        class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-stone-100"
         :class="item.variant === 'danger' ? 'text-danger-600' : 'text-stone-700'"
         @click="pick(item)"
       >
-        {{ item.label }}
+        <component v-if="item.icon" :is="item.icon" class="h-4 w-4 shrink-0" />
+        <span>{{ item.label }}</span>
       </button>
     </div>
   </Teleport>

@@ -173,8 +173,8 @@ const householdsHovered = computed(
     during the width transition without clipping the button.
   -->
   <div
-    class="fixed h-[calc(100%-79px)] flex-shrink-0 transition-[width] duration-200 border border-stone-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
-    :class="sidebarOpen ? 'w-[320px]' : 'w-0'"
+    class="fixed h-[calc(100%-79px)] flex-shrink-0 transition-[width] duration-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
+    :class="sidebarOpen ? 'w-[320px] border border-stone-200' : 'w-0'"
   >
     <!-- Content pane (clips at the wrapper boundary) -->
     <div class="absolute inset-0 flex flex-col overflow-hidden">

@@ -9,6 +9,12 @@ import {
   type ExistingHousehold,
 } from '@/lib/lcr/diff';
 import { applyStructure } from '@/lib/lcr/applyStructure';
+import {
+  isPlanEmpty,
+  modeUnavailableReason,
+  planImport,
+  type ImportMode,
+} from '@/lib/lcr/plan';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
 import { useDistrictsStore } from '@/stores/districts';
@@ -30,13 +36,43 @@ const diff = ref<DiffResult | null>(null);
 const phase = ref<'paste' | 'preview' | 'applying' | 'done'>('paste');
 const errorMsg = ref<string | null>(null);
 const applyLog = ref<string[]>([]);
-const importStructure = ref(true);
+const mode = ref<ImportMode>('full');
 
 const stats = computed(() => (diff.value ? summarizeDiff(diff.value) : null));
 
-const willReplaceStructure = computed(
-  () => importStructure.value && (districts.items.length > 0 || companionships.items.length > 0),
+const unassignedFound = computed(() => ({
+  elders: parsed.value?.elders.filter((e) => e.unassigned).length ?? 0,
+  households: parsed.value?.households.filter((h) => h.unassigned).length ?? 0,
+}));
+
+/** The exact set of writes the selected mode will make. Drives preview + apply. */
+const plan = computed(() => (diff.value ? planImport(diff.value, mode.value) : null));
+
+/** New people the import will create who have no companionship in LCR. */
+const newUnassigned = computed(() => ({
+  elders: plan.value?.eldersToAdd.filter((e) => e.unassigned) ?? [],
+  households: plan.value?.householdsToAdd.filter((h) => h.unassigned) ?? [],
+}));
+
+const notGenerallyAssignedCount = computed(
+  () => parsed.value?.elders.filter((e) => e.notGenerallyAssigned).length ?? 0,
 );
+
+const modeBlocked = computed(() =>
+  parsed.value ? modeUnavailableReason(mode.value, parsed.value) : null,
+);
+
+const nothingToDo = computed(() => (plan.value ? isPlanEmpty(plan.value) : true));
+
+const willReplaceStructure = computed(
+  () =>
+    mode.value === 'full' && (districts.items.length > 0 || companionships.items.length > 0),
+);
+
+const totalSkipped = computed(() => {
+  const s = plan.value?.skipped;
+  return s ? s.assignedElders + s.assignedHouseholds + s.ageUpdates : 0;
+});
 
 function reset() {
   html.value = '';
@@ -45,7 +81,7 @@ function reset() {
   phase.value = 'paste';
   errorMsg.value = null;
   applyLog.value = [];
-  importStructure.value = true;
+  mode.value = 'full';
 }
 
 function close() {
@@ -79,36 +115,30 @@ function preview() {
 }
 
 async function apply() {
-  if (!diff.value || !parsed.value) return;
+  if (!plan.value || !parsed.value) return;
+  const p = plan.value;
   phase.value = 'applying';
   applyLog.value = [];
   errorMsg.value = null;
   try {
-    // 1) Elder/household upserts
-    let added = 0;
-    let updated = 0;
-    for (const change of diff.value.elders) {
-      if (change.kind === 'add') {
-        await elders.add(change.parsed.name, change.parsed.age);
-        added++;
-      } else if (change.kind === 'age-change') {
-        await elders.update(change.existing!.id, { age: change.parsed.age });
-        updated++;
-      }
-    }
-    applyLog.value.push(`Elders: +${added} added, ${updated} ages updated.`);
+    // 1) People. The plan already filtered these down to the chosen mode.
+    for (const e of p.eldersToAdd) await elders.add(e.name, e.age);
+    for (const u of p.elderAgeUpdates) await elders.update(u.id, { age: u.age });
+    applyLog.value.push(
+      `Elders: +${p.eldersToAdd.length} added, ${p.elderAgeUpdates.length} ages updated.`,
+    );
 
-    let hAdded = 0;
-    for (const change of diff.value.households) {
-      if (change.kind === 'add') {
-        await households.add(change.parsed.name);
-        hAdded++;
-      }
-    }
-    applyLog.value.push(`Households: +${hAdded} added.`);
+    for (const h of p.householdsToAdd) await households.add(h.name);
+    applyLog.value.push(`Households: +${p.householdsToAdd.length} added.`);
 
-    // 2) Optional structural import
-    if (importStructure.value) {
+    const unassignedAdded =
+      newUnassigned.value.elders.length + newUnassigned.value.households.length;
+    if (unassignedAdded) {
+      applyLog.value.push(`${unassignedAdded} of those had no companionship in LCR.`);
+    }
+
+    // 2) Board structure — only 'full' touches it.
+    if (p.replaceStructure) {
       if (!auth.wardId) throw new Error('No ward.');
       const result = await applyStructure({
         parsed: parsed.value,
@@ -130,7 +160,13 @@ async function apply() {
         `Linked ${result.elderLinksCreated} elders and ${result.householdLinksCreated} households to companionships.`,
       );
     } else {
-      applyLog.value.push(`Skipped districts and companionships (you opted out).`);
+      applyLog.value.push('Left your districts and companionships untouched.');
+    }
+
+    if (totalSkipped.value) {
+      applyLog.value.push(
+        `Skipped ${totalSkipped.value} change(s) outside this mode (people already assigned in LCR, and age updates).`,
+      );
     }
 
     phase.value = 'done';
@@ -161,6 +197,10 @@ async function apply() {
               On the LCR ministering page, save the page (Cmd+S → "Webpage, HTML Only") or copy
               the source (Cmd+Option+U then Cmd+A, Cmd+C). Paste the contents below.
             </p>
+            <p class="text-xs text-stone-500">
+              Tip: use the <span class="font-medium">Unassigned</span> tab. That page carries the
+              full eligible roster, so elders and households with no companionship come across too.
+            </p>
             <textarea
               v-model="html"
               rows="14"
@@ -187,7 +227,7 @@ async function apply() {
           </div>
 
           <!-- Phase: preview -->
-          <div v-else-if="phase === 'preview' && diff && stats && parsed" class="space-y-4">
+          <div v-else-if="phase === 'preview' && diff && stats && parsed && plan" class="space-y-4">
             <div
               class="grid grid-cols-2 gap-3 rounded border border-stone-200 bg-stone-50 p-3 text-sm"
             >
@@ -196,16 +236,31 @@ async function apply() {
                 <ul class="text-stone-700">
                   <li>{{ parsed.districts.length }} districts</li>
                   <li>{{ parsed.companionships.length }} companionships</li>
-                  <li>{{ parsed.elders.length }} elders</li>
-                  <li>{{ parsed.households.length }} households</li>
+                  <li>
+                    {{ parsed.elders.length }} elders
+                    <span class="text-stone-500">({{ unassignedFound.elders }} unassigned)</span>
+                  </li>
+                  <li>
+                    {{ parsed.households.length }} households
+                    <span class="text-stone-500">
+                      ({{ unassignedFound.households }} unassigned)
+                    </span>
+                  </li>
                 </ul>
               </div>
               <div>
                 <div class="font-semibold">Will apply</div>
                 <ul class="text-stone-700">
-                  <li>+{{ stats.eldersAdded }} new elders</li>
-                  <li>{{ stats.eldersAgeChanged }} elder ages updated</li>
-                  <li>+{{ stats.householdsAdded }} new households</li>
+                  <li>+{{ plan.eldersToAdd.length }} new elders</li>
+                  <li>+{{ plan.householdsToAdd.length }} new households</li>
+                  <li>{{ plan.elderAgeUpdates.length }} elder ages updated</li>
+                  <li :class="plan.replaceStructure ? 'font-medium text-warn-600' : 'text-stone-700'">
+                    {{
+                      plan.replaceStructure
+                        ? 'Districts + companionships rebuilt'
+                        : 'Board left untouched'
+                    }}
+                  </li>
                   <li class="text-stone-500">
                     {{ stats.eldersUnchanged }} elders + {{ stats.householdsUnchanged }} households
                     already match (no change)
@@ -214,45 +269,95 @@ async function apply() {
               </div>
             </div>
 
-            <details v-if="diff.elders.some((e) => e.kind === 'add')" class="rounded border border-stone-200">
+            <div
+              v-if="parsed.warnings.length"
+              class="rounded border border-warn-200 bg-warn-50 px-3 py-2 text-xs text-warn-600"
+            >
+              <p v-for="(w, i) in parsed.warnings" :key="i">⚠️ {{ w }}</p>
+            </div>
+
+            <details
+              v-if="
+                mode !== 'unassigned' &&
+                newUnassigned.elders.length + newUnassigned.households.length > 0
+              "
+              class="rounded border border-stone-200"
+            >
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
-                New elders ({{ stats.eldersAdded }})
+                New unassigned people ({{
+                  newUnassigned.elders.length + newUnassigned.households.length
+                }})
+              </summary>
+              <div class="px-3 py-2 text-xs text-stone-700">
+                <p class="mb-2 text-stone-600">
+                  These have no companionship in LCR. They'll land in the Unassigned lists in the
+                  sidebar, ready to place on the canvas.
+                </p>
+                <ul class="max-h-40 space-y-1 overflow-y-auto">
+                  <li
+                    v-for="e in newUnassigned.elders"
+                    :key="'ue-' + e.legacyId"
+                    class="flex justify-between"
+                  >
+                    <span>
+                      {{ e.name }} <span class="text-stone-500">(elder)</span>
+                      <span v-if="e.notGenerallyAssigned" class="text-stone-400">
+                        · not generally assigned
+                      </span>
+                    </span>
+                    <span class="text-stone-500">{{ e.age ?? '—' }}</span>
+                  </li>
+                  <li v-for="h in newUnassigned.households" :key="'uh-' + h.legacyId">
+                    {{ h.name }} <span class="text-stone-500">(household)</span>
+                  </li>
+                </ul>
+                <p v-if="notGenerallyAssignedCount" class="mt-2 text-stone-500">
+                  {{ notGenerallyAssignedCount }} elder(s) in this import are flagged by LCR as
+                  “not generally assigned” (bishopric, stake callings, missionaries). They're
+                  imported so you can see them; hide any you don't want on the board.
+                </p>
+              </div>
+            </details>
+
+            <details v-if="plan.eldersToAdd.length" class="rounded border border-stone-200">
+              <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
+                New elders ({{ plan.eldersToAdd.length }})
               </summary>
               <ul class="max-h-40 space-y-1 overflow-y-auto px-3 py-2 text-xs">
                 <li
-                  v-for="(c, i) in diff.elders.filter((e) => e.kind === 'add')"
-                  :key="i"
+                  v-for="e in plan.eldersToAdd"
+                  :key="e.legacyId"
                   class="flex justify-between"
                 >
-                  <span>{{ c.parsed.name }}</span>
-                  <span class="text-stone-500">{{ c.parsed.age ?? '—' }}</span>
+                  <span>
+                    {{ e.name }}
+                    <span v-if="e.unassigned" class="text-stone-400">· unassigned</span>
+                  </span>
+                  <span class="text-stone-500">{{ e.age ?? '—' }}</span>
                 </li>
               </ul>
             </details>
 
-            <details v-if="stats.eldersAgeChanged" class="rounded border border-stone-200">
+            <details v-if="plan.elderAgeUpdates.length" class="rounded border border-stone-200">
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
-                Age changes ({{ stats.eldersAgeChanged }})
+                Age changes ({{ plan.elderAgeUpdates.length }})
               </summary>
               <ul class="max-h-40 space-y-1 overflow-y-auto px-3 py-2 text-xs">
-                <li
-                  v-for="(c, i) in diff.elders.filter((e) => e.kind === 'age-change')"
-                  :key="i"
-                  class="flex justify-between"
-                >
-                  <span>{{ c.parsed.name }}</span>
-                  <span class="text-stone-500">{{ c.prevAge ?? '—' }} → {{ c.parsed.age ?? '—' }}</span>
+                <li v-for="u in plan.elderAgeUpdates" :key="u.id" class="flex justify-between">
+                  <span>{{ u.name }}</span>
+                  <span class="text-stone-500">{{ u.prevAge ?? '—' }} → {{ u.age ?? '—' }}</span>
                 </li>
               </ul>
             </details>
 
-            <details v-if="diff.households.some((h) => h.kind === 'add')" class="rounded border border-stone-200">
+            <details v-if="plan.householdsToAdd.length" class="rounded border border-stone-200">
               <summary class="cursor-pointer px-3 py-2 text-sm font-medium">
-                New households ({{ stats.householdsAdded }})
+                New households ({{ plan.householdsToAdd.length }})
               </summary>
               <ul class="max-h-40 space-y-1 overflow-y-auto px-3 py-2 text-xs">
-                <li v-for="(c, i) in diff.households.filter((h) => h.kind === 'add')" :key="i">
-                  {{ c.parsed.name }}
+                <li v-for="h in plan.householdsToAdd" :key="h.legacyId">
+                  {{ h.name }}
+                  <span v-if="h.unassigned" class="text-stone-400">· unassigned</span>
                 </li>
               </ul>
             </details>
@@ -279,20 +384,55 @@ async function apply() {
               </div>
             </details>
 
-            <div class="rounded border border-stone-200 p-3">
-              <label class="flex items-start gap-2 text-sm">
-                <input v-model="importStructure" type="checkbox" class="mt-0.5" />
+            <fieldset class="rounded border border-stone-200 p-3">
+              <legend class="px-1 text-sm font-medium">What should this import do?</legend>
+
+              <label class="flex items-start gap-2 py-1 text-sm">
+                <input v-model="mode" type="radio" value="full" class="mt-1" />
                 <span>
-                  <span class="font-medium">Also import districts and companionships</span>
+                  <span class="font-medium">Full import — replace the board</span>
                   <span class="block text-xs text-stone-500">
-                    Lays out
+                    Adds people, then rebuilds
                     {{ parsed.districts.length }} districts and
-                    {{ parsed.companionships.length }} companionships at default positions.
+                    {{ parsed.companionships.length }} companionships from LCR at default
+                    positions.
                   </span>
                 </span>
               </label>
+
+              <label class="flex items-start gap-2 py-1 text-sm">
+                <input v-model="mode" type="radio" value="people" class="mt-1" />
+                <span>
+                  <span class="font-medium">People only — keep my board</span>
+                  <span class="block text-xs text-stone-500">
+                    Adds every new elder and household and updates ages. Your districts,
+                    companionships, and card positions are left exactly as they are.
+                  </span>
+                </span>
+              </label>
+
+              <label class="flex items-start gap-2 py-1 text-sm">
+                <input v-model="mode" type="radio" value="unassigned" class="mt-1" />
+                <span>
+                  <span class="font-medium">Unassigned only — keep my board</span>
+                  <span class="block text-xs text-stone-500">
+                    Adds only the
+                    {{ unassignedFound.elders }} elders and
+                    {{ unassignedFound.households }} households that LCR shows with no
+                    companionship. Nothing else is created, updated, or removed.
+                  </span>
+                </span>
+              </label>
+
               <p
-                v-if="willReplaceStructure"
+                v-if="modeBlocked"
+                class="mt-2 rounded border border-warn-200 bg-warn-50 px-2 py-1 text-xs text-warn-600"
+              >
+                ⚠️ {{ modeBlocked }}
+              </p>
+
+              <p
+                v-else-if="willReplaceStructure"
                 class="mt-2 rounded border border-warn-200 bg-warn-50 px-2 py-1 text-xs text-warn-600"
               >
                 ⚠️ This will replace your existing
@@ -300,7 +440,24 @@ async function apply() {
                 {{ companionships.items.length }} companionships. Save a snapshot first if you
                 want to keep the current layout.
               </p>
-            </div>
+
+              <p
+                v-else-if="totalSkipped"
+                class="mt-2 rounded border border-stone-200 bg-stone-50 px-2 py-1 text-xs text-stone-600"
+              >
+                This mode leaves out {{ plan.skipped.assignedElders }} new elders and
+                {{ plan.skipped.assignedHouseholds }} new households that already have a
+                companionship in LCR, plus {{ plan.skipped.ageUpdates }} age update(s). Choose
+                “People only” to bring those across without touching your board.
+              </p>
+
+              <p
+                v-else-if="nothingToDo"
+                class="mt-2 rounded border border-stone-200 bg-stone-50 px-2 py-1 text-xs text-stone-600"
+              >
+                Nothing to do — everything in this import already matches what you have.
+              </p>
+            </fieldset>
 
             <p v-if="errorMsg" class="text-sm text-danger-600">{{ errorMsg }}</p>
 
@@ -312,7 +469,8 @@ async function apply() {
                 Back
               </button>
               <button
-                class="rounded bg-stone-900 px-3 py-1 text-sm text-white"
+                class="rounded bg-stone-900 px-3 py-1 text-sm text-white disabled:opacity-50"
+                :disabled="!!modeBlocked || nothingToDo"
                 @click="apply"
               >
                 Apply

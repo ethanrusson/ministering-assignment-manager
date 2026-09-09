@@ -4,16 +4,30 @@
 //   2. Chrome "View Source" HTML (table-of-spans), where the JSON lives in
 //      a <script> tag whose text content survives DOM parsing.
 //   3. Raw __NEXT_DATA__ JSON pasted directly.
+//
+// Two parts of the page state matter:
+//   • ministeringData.elders — districts → companionships → ministers/assignments.
+//     This is the assigned structure.
+//   • ministeringData.eligibleMinistersAndAssignments — the full eligible roster
+//     (eligibleMinisters / eligibleAssignments). Anyone in that roster who never
+//     appears in a companionship is unassigned; that is the only place LCR
+//     exposes them.
 
 export interface ParsedElder {
   legacyId: string; // LCR personUuid
   name: string; // "Lastname, Firstname"
   age: number | null;
+  /** No companionship on the imported page lists this person as a minister. */
+  unassigned: boolean;
+  /** LCR flags bishoprics, stake leaders, and missionaries as not generally assigned. */
+  notGenerallyAssigned: boolean;
 }
 
 export interface ParsedHousehold {
   legacyId: string; // LCR personUuid of head-of-household
   name: string; // "Lastname, Firstname"
+  /** No companionship on the imported page is assigned to this household. */
+  unassigned: boolean;
 }
 
 export interface ParsedDistrict {
@@ -33,6 +47,8 @@ export interface ParseResult {
   elders: ParsedElder[];
   households: ParsedHousehold[];
   companionships: ParsedCompanionship[];
+  /** True when the page carried an eligible roster, so unassigned people are trustworthy. */
+  hasEligibleRoster: boolean;
   warnings: string[];
 }
 
@@ -46,6 +62,9 @@ interface LcrPerson {
   name: string;
   age?: number | null;
 }
+interface LcrEligibleMinister extends LcrPerson {
+  notGenerallyAssigned?: boolean;
+}
 interface LcrCompanionship {
   id: string;
   ministers?: LcrPerson[];
@@ -56,12 +75,17 @@ interface LcrDistrict {
   districtName: string;
   companionships?: LcrCompanionship[];
 }
+interface LcrEligible {
+  eligibleMinisters?: LcrEligibleMinister[];
+  eligibleAssignments?: LcrPerson[];
+}
 interface LcrNextData {
   props?: {
     pageProps?: {
       initialState?: {
         ministeringData?: {
           elders?: LcrDistrict[];
+          eligibleMinistersAndAssignments?: LcrEligible;
         };
       };
     };
@@ -82,25 +106,28 @@ export class LcrHtmlParserV1 implements LcrParser {
     } catch (e) {
       throw new Error(`Found __NEXT_DATA__ but JSON parse failed: ${(e as Error).message}`);
     }
-    const districts = data.props?.pageProps?.initialState?.ministeringData?.elders;
+    const ministering = data.props?.pageProps?.initialState?.ministeringData;
+    const districts = ministering?.elders;
     if (!Array.isArray(districts)) {
       throw new Error('Page state did not include ministeringData.elders. Wrong page?');
     }
-    return walk(districts);
+    return walk(districts, ministering?.eligibleMinistersAndAssignments);
   }
 }
 
-function walk(districts: LcrDistrict[]): ParseResult {
+function walk(districts: LcrDistrict[], eligible: LcrEligible | undefined): ParseResult {
   const result: ParseResult = {
     districts: [],
     elders: [],
     households: [],
     companionships: [],
+    hasEligibleRoster: false,
     warnings: [],
   };
   const eldersByUuid = new Map<string, ParsedElder>();
   const householdsByUuid = new Map<string, ParsedHousehold>();
 
+  // 1) Assigned structure. Everyone reached here is, by definition, assigned.
   for (const d of districts) {
     if (!d.districtUuid || !d.districtName) {
       result.warnings.push('Skipped a district without uuid/name.');
@@ -123,6 +150,8 @@ function walk(districts: LcrDistrict[]): ParseResult {
             legacyId: m.personUuid,
             name: m.name,
             age: typeof m.age === 'number' ? m.age : null,
+            unassigned: false,
+            notGenerallyAssigned: false,
           });
         }
         elderIds.push(m.personUuid);
@@ -134,6 +163,7 @@ function walk(districts: LcrDistrict[]): ParseResult {
           householdsByUuid.set(a.personUuid, {
             legacyId: a.personUuid,
             name: a.name,
+            unassigned: false,
           });
         }
         householdIds.push(a.personUuid);
@@ -146,6 +176,48 @@ function walk(districts: LcrDistrict[]): ParseResult {
         householdLegacyIds: householdIds,
       });
     }
+  }
+
+  // 2) Eligible roster. Anything not already seen above is unassigned.
+  const ministers = eligible?.eligibleMinisters;
+  const assignments = eligible?.eligibleAssignments;
+  result.hasEligibleRoster = Array.isArray(ministers) || Array.isArray(assignments);
+
+  if (!result.hasEligibleRoster) {
+    result.warnings.push(
+      'This page had no eligible roster, so unassigned elders and households were not imported. ' +
+        'Open the ministering page in LCR (the Unassigned tab is a reliable source) and copy it again.',
+    );
+  }
+
+  for (const m of ministers ?? []) {
+    if (!m.personUuid || !m.name) continue;
+    const age = typeof m.age === 'number' ? m.age : null;
+    const flagged = m.notGenerallyAssigned === true;
+    const seen = eldersByUuid.get(m.personUuid);
+    if (seen) {
+      // Already assigned — enrich, never downgrade `unassigned`.
+      seen.notGenerallyAssigned = flagged;
+      if (seen.age === null) seen.age = age;
+      continue;
+    }
+    eldersByUuid.set(m.personUuid, {
+      legacyId: m.personUuid,
+      name: m.name,
+      age,
+      unassigned: true,
+      notGenerallyAssigned: flagged,
+    });
+  }
+
+  for (const a of assignments ?? []) {
+    if (!a.personUuid || !a.name) continue;
+    if (householdsByUuid.has(a.personUuid)) continue;
+    householdsByUuid.set(a.personUuid, {
+      legacyId: a.personUuid,
+      name: a.name,
+      unassigned: true,
+    });
   }
 
   result.elders = [...eldersByUuid.values()].sort((a, b) => a.name.localeCompare(b.name));

@@ -160,7 +160,7 @@ const isHovered = computed(
         :key="h.id"
         class="group flex flex-col gap-1 px-3 py-2"
         :class="h.hidden && 'opacity-50'"
-        @pointerdown.stop="transfer.startDrag($event, 'household', h.id, null)"
+        @pointerdown.stop="transfer.startDrag($event, 'household', h.id)"
       >
         <div class="flex items-center gap-2">
           <span class="flex-1 truncate text-sm">{{ h.name }}</span>

@@ -9,20 +9,32 @@
 //     start a pan.
 //   - 2 pointers down => start a pinch (always overrides whatever).
 //   - Wheel => zoom about cursor (or pan if shift held).
+//   - In view mode (see useViewMode) nothing on the canvas is draggable, so
+//     the [data-card] exception above is dropped and any drag pans.
 //
 // Notes:
 //   - touch-action:none is critical so iOS Safari doesn't fight us for gestures.
 //   - We use Pointer Events for unified mouse+touch+pen.
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { useAuthStore } from '@/stores/auth';
-import { usePanZoom, ZOOM_MAX, ZOOM_MIN } from './usePanZoom';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { useAuthStore } from "@/stores/auth";
+import { usePanZoom, ZOOM_MAX, ZOOM_MIN } from "./usePanZoom";
+import { setLayoutPreserver } from "@/lib/assignment";
+import { useViewMode } from "./useViewMode";
+import { HandRaisedIcon, PencilSquareIcon } from "@heroicons/vue/24/outline";
 
 const auth = useAuthStore();
+const { locked, toggle: toggleMode } = useViewMode();
 const root = ref<HTMLDivElement | null>(null);
-const { state: viewport, panBy, zoomAt, zoomIn, zoomOut, fitTo, reset } = usePanZoom(
-  () => auth.wardId,
-);
+const {
+  state: viewport,
+  panBy,
+  zoomAt,
+  zoomIn,
+  zoomOut,
+  fitTo,
+  reset,
+} = usePanZoom(() => auth.wardId);
 
 // Active pointers — handled differently for 1 vs 2.
 type PointerInfo = { x: number; y: number };
@@ -33,7 +45,12 @@ let spaceHeld = false;
 
 function isCardTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
-  return !!t.closest('[data-card], [data-district-handle], [data-no-pan]');
+  // Floating UI chrome is never a pan surface, in either mode.
+  if (t.closest("[data-no-pan]")) return true;
+  // View mode: nothing on the canvas is draggable, so every other target —
+  // cards included — is fair game for a pan.
+  if (locked.value) return false;
+  return !!t.closest("[data-card], [data-district-handle]");
 }
 
 function localPoint(e: PointerEvent | WheelEvent) {
@@ -66,9 +83,9 @@ function onPointerDown(e: PointerEvent) {
   // on empty space pans — drag-cards rule above already exits early for cards).
   const isPanIntent =
     e.button === 1 || // middle click
-    (e.pointerType === 'mouse' && spaceHeld) ||
-    e.pointerType === 'touch' ||
-    e.pointerType === 'pen';
+    (e.pointerType === "mouse" && (spaceHeld || locked.value)) ||
+    e.pointerType === "touch" ||
+    e.pointerType === "pen";
 
   if (isPanIntent) {
     panLast = p;
@@ -127,30 +144,111 @@ function onWheel(e: WheelEvent) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (e.code === 'Space') spaceHeld = true;
+  if (e.code === "Space") spaceHeld = true;
 }
 function onKeyUp(e: KeyboardEvent) {
-  if (e.code === 'Space') spaceHeld = false;
+  if (e.code === "Space") spaceHeld = false;
+}
+
+// ─── Keep the user's view put when a drop reflows the canvas ───────────────
+//
+// Assigning/unassigning an elder or household changes a card's height, which
+// re-packs its masonry column and slides cards below it in world space. We
+// snapshot the screen position of the card nearest the viewport center before
+// the mutation, then nudge the pan so that card lands back where it was once
+// the new layout settles — so the user stays looking at what they dropped on.
+
+/** The companionship card whose center is nearest the viewport center. */
+function anchorCard(): { id: string; worldX: number; worldY: number } | null {
+  const el = root.value;
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const cx = r.width / 2;
+  const cy = r.height / 2;
+  let best: { id: string; worldX: number; worldY: number } | null = null;
+  let bestDist = Infinity;
+  el.querySelectorAll<HTMLElement>("[data-companionship-id]").forEach(
+    (node) => {
+      const wx = Number(node.dataset.x);
+      const wy = Number(node.dataset.y);
+      const w = Number(node.dataset.w ?? node.offsetWidth);
+      const h = Number(node.dataset.h ?? node.offsetHeight);
+      if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
+      const sx = (wx + w / 2) * viewport.scale + viewport.tx;
+      const sy = (wy + h / 2) * viewport.scale + viewport.ty;
+      const dist = Math.hypot(sx - cx, sy - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { id: node.dataset.companionshipId!, worldX: wx, worldY: wy };
+      }
+    },
+  );
+  return best;
+}
+
+async function preserveViewDuring<T>(mutate: () => Promise<T>): Promise<T> {
+  const anchor = anchorCard();
+  // Screen-space top-left of the anchor before the mutation.
+  const screenXBefore = anchor
+    ? anchor.worldX * viewport.scale + viewport.tx
+    : 0;
+  const screenYBefore = anchor
+    ? anchor.worldY * viewport.scale + viewport.ty
+    : 0;
+
+  const result = await mutate();
+  if (!anchor) return result;
+
+  await nextTick();
+  // The added/removed row triggers a ResizeObserver-driven re-pack a frame or
+  // two later, so re-pin the anchor over a short window until its world
+  // position stops changing (or we hit the frame cap).
+  let frames = 0;
+  let stableFor = 0;
+  let lastY = NaN;
+  const step = () => {
+    const node = root.value?.querySelector<HTMLElement>(
+      `[data-companionship-id="${anchor.id}"]`,
+    );
+    if (node) {
+      const wx = Number(node.dataset.x);
+      const wy = Number(node.dataset.y);
+      if (Number.isFinite(wx) && Number.isFinite(wy)) {
+        viewport.tx = screenXBefore - wx * viewport.scale;
+        viewport.ty = screenYBefore - wy * viewport.scale;
+        stableFor = wy === lastY ? stableFor + 1 : 0;
+        lastY = wy;
+      }
+    }
+    frames++;
+    if (stableFor < 2 && frames < 20) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+
+  return result;
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  setLayoutPreserver(preserveViewDuring);
 });
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeyDown);
-  window.removeEventListener('keyup', onKeyUp);
+  window.removeEventListener("keydown", onKeyDown);
+  window.removeEventListener("keyup", onKeyUp);
+  setLayoutPreserver(null);
 });
 
 const transform = computed(
-  () => `translate(${viewport.tx}px, ${viewport.ty}px) scale(${viewport.scale})`,
+  () =>
+    `translate(${viewport.tx}px, ${viewport.ty}px) scale(${viewport.scale})`,
 );
 const zoomPct = computed(() => Math.round(viewport.scale * 100));
 
 function fitToContent() {
   if (!root.value) return;
   // Find world bbox of all districts + companionships from DOM.
-  const els = root.value.querySelectorAll<HTMLElement>('[data-bbox]');
+  const els = root.value.querySelectorAll<HTMLElement>("[data-bbox]");
   if (!els.length) {
     reset();
     return;
@@ -184,7 +282,10 @@ function fitToContent() {
 
 /** Center the view on a single world-space bbox at a comfortable zoom level.
  * Capped at 1× so single-card targets don't blow up to ZOOM_MAX. */
-function zoomToBbox(bbox: { x: number; y: number; w: number; h: number }, padding = 200) {
+function zoomToBbox(
+  bbox: { x: number; y: number; w: number; h: number },
+  padding = 200,
+) {
   if (!root.value) return;
   const r = root.value.getBoundingClientRect();
   fitTo(bbox, { width: r.width, height: r.height }, padding, 1);
@@ -212,34 +313,74 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
       <slot />
     </div>
 
-    <!-- Floating controls -->
+    <!-- Floating controls. Touch targets are 40px so they stay usable on a
+         phone; the bar clears the iOS home indicator via safe-area inset. -->
     <div
-      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -transtone-x-1/2 items-center gap-1 rounded-full border border-stone-200 bg-white/90 px-2 py-1 shadow"
+      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur"
+      style="bottom: max(1rem, env(safe-area-inset-bottom))"
+      data-no-pan
     >
+      <!-- View / Edit mode -->
       <button
-        class="rounded p-1 text-sm hover:bg-stone-100 disabled:opacity-50"
+        class="flex h-10 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors"
+        :class="
+          locked
+            ? 'bg-stone-800 text-white'
+            : 'bg-emerald-600 text-white'
+        "
+        :title="
+          locked
+            ? 'View mode — drag to pan, nothing moves. Tap to edit.'
+            : 'Edit mode — cards and chips are draggable. Tap to lock.'
+        "
+        :aria-pressed="locked"
+        @click="toggleMode"
+      >
+        <component
+          :is="locked ? HandRaisedIcon : PencilSquareIcon"
+          class="h-4 w-4 shrink-0"
+        />
+        <span>{{ locked ? "View" : "Edit" }}</span>
+      </button>
+
+      <span class="mx-1 h-5 w-px bg-stone-300"></span>
+
+      <button
+        class="h-10 w-10 rounded-full text-lg leading-none hover:bg-stone-100 disabled:opacity-40"
         title="Zoom out"
+        aria-label="Zoom out"
         :disabled="viewport.scale <= ZOOM_MIN + 0.001"
         @click="zoomOut(root!.clientWidth / 2, root!.clientHeight / 2)"
       >
         −
       </button>
-      <span class="min-w-[3ch] text-center text-xs tabular-nums text-stone-600">
+      <span class="min-w-[4ch] text-center text-xs tabular-nums text-stone-600">
         {{ zoomPct }}%
       </span>
       <button
-        class="rounded p-1 text-sm hover:bg-stone-100 disabled:opacity-50"
+        class="h-10 w-10 rounded-full text-lg leading-none hover:bg-stone-100 disabled:opacity-40"
         title="Zoom in"
+        aria-label="Zoom in"
         :disabled="viewport.scale >= ZOOM_MAX - 0.001"
         @click="zoomIn(root!.clientWidth / 2, root!.clientHeight / 2)"
       >
         +
       </button>
-      <span class="mx-1 h-4 w-px bg-stone-300"></span>
-      <button class="rounded px-2 py-1 text-xs hover:bg-stone-100" @click="fitToContent">
+
+      <span class="mx-1 h-5 w-px bg-stone-300"></span>
+
+      <button
+        class="h-10 rounded-full px-3 text-xs hover:bg-stone-100"
+        title="Fit everything on screen"
+        @click="fitToContent"
+      >
         Fit
       </button>
-      <button class="rounded px-2 py-1 text-xs hover:bg-stone-100" @click="reset">
+      <button
+        class="hidden h-10 rounded-full px-3 text-xs hover:bg-stone-100 sm:block"
+        title="Reset to 100%"
+        @click="reset"
+      >
         100%
       </button>
     </div>

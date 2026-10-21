@@ -126,7 +126,7 @@ const isHovered = computed(() => transfer.state.hoveredDropZone?.kind === 'sideb
         ]"
         data-drop-zone="elder-item"
         :data-elder-id="elder.id"
-        @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, null)"
+        @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id)"
       >
         <span class="flex-1 truncate text-sm">{{ elder.name }}</span>
         <AgeBadge :age="elder.age" />

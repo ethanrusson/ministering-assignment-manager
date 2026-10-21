@@ -25,7 +25,14 @@ const labels = useLabelsStore();
 const companionships = useCompanionshipsStore();
 const transfer = useTransfer();
 
-const sidebarOpen = ref(true);
+// The panel is a 320px overlay, which covers a phone screen whole — start it
+// collapsed there so the canvas is what you land on. innerWidth reads 0 in
+// some offscreen/headless contexts; treat an unknown width as desktop.
+const isNarrowScreen =
+  typeof window !== 'undefined' &&
+  window.innerWidth > 0 &&
+  window.innerWidth < 640;
+const sidebarOpen = ref(!isNarrowScreen);
 const eldersOpen = ref(true);
 const householdsOpen = ref(true);
 
@@ -173,7 +180,7 @@ const householdsHovered = computed(
     during the width transition without clipping the button.
   -->
   <div
-    class="fixed h-[calc(100%-79px)] flex-shrink-0 transition-[width] duration-200 bg-white box-shadow-lg m-4 rounded-lg z-20"
+    class="absolute inset-y-0 left-0 flex-shrink-0 transition-[width] duration-200 bg-white shadow-lg m-4 rounded-lg z-20"
     :class="sidebarOpen ? 'w-[320px] border border-stone-200' : 'w-0'"
   >
     <!-- Content pane (clips at the wrapper boundary) -->
@@ -262,7 +269,7 @@ const householdsHovered = computed(
             ]"
             data-drop-zone="elder-item"
             :data-elder-id="elder.id"
-            @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, null)"
+            @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id)"
           >
             <span class="flex-1 truncate text-sm">{{ elder.name }}</span>
             <AgeBadge :age="elder.age" />
@@ -393,7 +400,7 @@ const householdsHovered = computed(
             :key="h.id"
             class="group flex flex-col gap-1 px-3 py-2"
             :class="h.hidden && 'opacity-50'"
-            @pointerdown.stop="transfer.startDrag($event, 'household', h.id, null)"
+            @pointerdown.stop="transfer.startDrag($event, 'household', h.id)"
           >
             <div class="flex h-5 items-center gap-2">
               <span class="flex-1 truncate text-sm">{{ h.name }}</span>

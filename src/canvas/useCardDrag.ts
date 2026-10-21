@@ -7,6 +7,7 @@
 // get world-space deltas. Initial card position is in world units.
 
 import { ref } from 'vue';
+import { isViewMode } from './useViewMode';
 
 export interface DragHandlers {
   /** Called on pointerdown. Return false to skip starting the drag. */
@@ -21,6 +22,9 @@ export function useCardDrag(scaleRef: () => number) {
 
   function makeStart(initialPosFn: () => { x: number; y: number }, h: DragHandlers) {
     return (e: PointerEvent) => {
+      // View mode: don't start, and don't stopPropagation either — the event
+      // needs to reach the canvas so the gesture pans instead.
+      if (isViewMode()) return;
       if (h.shouldStart && !h.shouldStart(e)) return;
       // Only react to primary pointer; ignore right-clicks.
       if (e.button !== 0 && e.pointerType === 'mouse') return;

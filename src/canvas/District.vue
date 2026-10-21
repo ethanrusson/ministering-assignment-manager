@@ -13,6 +13,7 @@ import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useCardDrag } from './useCardDrag';
 import { useDragPreview } from './dragPreview';
+import { useViewMode } from './useViewMode';
 import {
   CARD_W,
   COL_GAP,
@@ -34,6 +35,7 @@ const props = defineProps<{ district: DistrictRow; scale: number }>();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 const dragPreview = useDragPreview();
+const { locked } = useViewMode();
 
 // Live-drag visuals: optimistic position while dragging, only persist on drop.
 const liveX = ref<number | null>(null);
@@ -175,12 +177,13 @@ void columnXForIndex;
   >
     <!-- Title bar (move handle) -->
     <div
-      class="flex h-9 cursor-move items-center justify-between gap-2 rounded-t-md border-b border-stone-300 bg-stone-200/80 px-3 text-sm font-medium text-stone-700"
+      class="flex h-9 items-center justify-between gap-2 rounded-t-md border-b border-stone-300 bg-stone-200/80 px-3 text-sm font-medium text-stone-700"
+      :class="locked ? '' : 'cursor-move'"
       data-district-handle="move"
       @pointerdown="startMove"
     >
       <span class="truncate">{{ district.name }}</span>
-      <div class="flex items-center gap-1" data-no-pan @pointerdown.stop>
+      <div v-if="!locked" class="flex items-center gap-1" data-no-pan @pointerdown.stop>
         <button class="rounded px-1 text-xs hover:bg-stone-300/60" title="Rename" @click="rename">
           ✎
         </button>

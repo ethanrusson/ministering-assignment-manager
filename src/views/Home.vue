@@ -319,7 +319,9 @@ const isEmptyCanvas = computed(
 </script>
 
 <template>
-  <div class="flex h-screen flex-col">
+  <!-- 100dvh (with h-screen as the fallback) so mobile browser chrome
+       shrinking doesn't leave the canvas taller than the visible area. -->
+  <div class="flex h-screen flex-col overflow-hidden" style="height: 100dvh">
     <header
       class="flex items-center justify-between border-b border-stone-200 bg-stone-100 px-4 py-2"
     >
@@ -418,9 +420,9 @@ const isEmptyCanvas = computed(
       </div>
     </header>
 
-    <main>
+    <main class="relative min-h-0 flex-1">
       <LeftSidebar />
-      <section class="h-screen relative overflow-hidden" data-drop-zone="canvas">
+      <section class="relative h-full overflow-hidden" data-drop-zone="canvas">
         <SearchBar
           :open="searchOpen"
           :targets="searchTargets"

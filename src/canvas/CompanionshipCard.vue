@@ -11,6 +11,7 @@ import {
 } from '@/lib/validation';
 import { useCardDrag } from './useCardDrag';
 import { useTransfer } from './useTransfer';
+import { useViewMode } from './useViewMode';
 import { useDragPreview } from './dragPreview';
 import { useSnapshot } from './useSnapshot';
 import {
@@ -43,6 +44,7 @@ const elders = useEldersStore();
 const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const transfer = useTransfer();
+const { locked } = useViewMode();
 const dragPreview = useDragPreview();
 const snap = useSnapshot();
 
@@ -293,6 +295,16 @@ function updatePreview(p: { x: number; y: number }) {
   });
 }
 
+/** Start an elder/household transfer drag off a chip.
+ *
+ * In view mode this is a no-op *and* lets the event bubble, so the touch
+ * reaches the canvas and pans instead of picking the chip up. */
+function onTransferDown(e: PointerEvent, kind: 'elder' | 'household', id: string) {
+  if (locked.value) return;
+  e.stopPropagation();
+  transfer.startDrag(e, kind, id);
+}
+
 // ─── Context menu ──────────────────────────────────────────────────────────
 
 const menuOpen = ref(false);
@@ -311,6 +323,7 @@ function openMenuAt(clientX: number, clientY: number) {
   menuOpen.value = true;
 }
 function onContextMenu(e: MouseEvent) {
+  if (locked.value) return;
   e.preventDefault();
   openMenuAt(e.clientX, e.clientY);
 }
@@ -319,6 +332,7 @@ function onContextMenu(e: MouseEvent) {
 let longPressTimer: number | null = null;
 let longPressStart: { x: number; y: number } | null = null;
 function onCardPointerDown(e: PointerEvent) {
+  if (locked.value) return; // view mode: no context menu, the drag pans
   if (e.pointerType !== 'touch') return;
   longPressStart = { x: e.clientX, y: e.clientY };
   if (longPressTimer) window.clearTimeout(longPressTimer);
@@ -492,8 +506,9 @@ const startMove = makeStart(dragOriginPos, {
     @pointerup="cancelLongPress"
     @pointercancel="cancelLongPress"
   >
-    <!-- Three-dot menu (top-right) -->
+    <!-- Three-dot menu (top-right) — edit mode only -->
     <button
+      v-if="!locked"
       class="absolute right-1.5 top-1.5 z-10 rounded-md p-1 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700"
       data-no-pan
       title="Card actions"
@@ -504,8 +519,11 @@ const startMove = makeStart(dragOriginPos, {
       <EllipsisVerticalIcon class="h-4 w-4" />
     </button>
 
-    <!-- Drag handle — centered on card surface, no background strip -->
+    <!-- Drag handle — centered on card surface, no background strip.
+         Hidden in view mode: nothing to grab, and the top of the card
+         becomes plain pan surface. -->
     <div
+      v-if="!locked"
       class="flex shrink-0 cursor-grab items-center justify-center pb-1 pt-2 active:cursor-grabbing"
       @pointerdown.stop="startMove"
     >
@@ -516,18 +534,19 @@ const startMove = makeStart(dragOriginPos, {
     </div>
 
     <!-- Elders -->
-    <div class="px-3 pb-3">
+    <div class="px-3 pb-3" :class="locked ? 'pt-3' : ''">
       <p class="mb-2 text-xs text-stone-400">Elders · {{ elderRows.length }}</p>
       <div class="flex flex-wrap gap-1.5">
         <span
           v-for="elder in elderRows"
           :key="elder.id"
           class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-sm shadow-sm"
+          :class="locked ? '' : 'cursor-grab active:cursor-grabbing'"
           data-transfer
           :data-transfer-kind="'elder'"
           :data-transfer-id="elder.id"
           :data-from-companionship="companionship.id"
-          @pointerdown.stop="transfer.startDrag($event, 'elder', elder.id, companionship.id)"
+          @pointerdown="onTransferDown($event, 'elder', elder.id)"
         >
           <span class="truncate" :class="elderClass(elder.id)">{{ elder.name }}</span>
           <AgeBadge :age="elder.age" />
@@ -549,14 +568,15 @@ const startMove = makeStart(dragOriginPos, {
           v-for="h in householdRows"
           :key="h.id"
           class="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-sm"
+          :class="locked ? '' : 'cursor-grab active:cursor-grabbing'"
           data-transfer
           :data-transfer-kind="'household'"
           :data-transfer-id="h.id"
           :data-from-companionship="companionship.id"
-          @pointerdown.stop="transfer.startDrag($event, 'household', h.id, companionship.id)"
+          @pointerdown="onTransferDown($event, 'household', h.id)"
         >
           <!-- Grip dots -->
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-2.5 shrink-0 text-stone-300" fill="currentColor" viewBox="0 0 8 12">
+          <svg v-if="!locked" xmlns="http://www.w3.org/2000/svg" class="h-3 w-2.5 shrink-0 text-stone-300" fill="currentColor" viewBox="0 0 8 12">
             <circle cx="2" cy="2" r="1.2"/><circle cx="6" cy="2" r="1.2"/>
             <circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/>
             <circle cx="2" cy="10" r="1.2"/><circle cx="6" cy="10" r="1.2"/>

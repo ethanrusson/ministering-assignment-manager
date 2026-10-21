@@ -13,7 +13,10 @@ import WardInviteModal from '@/components/WardInviteModal.vue';
 import Canvas from '@/canvas/Canvas.vue';
 import District from '@/canvas/District.vue';
 import CompanionshipCard from '@/canvas/CompanionshipCard.vue';
+import CardGrid from '@/canvas/CardGrid.vue';
+import { useBoardLayout } from '@/canvas/useBoardLayout';
 import TransferGhost from '@/canvas/TransferGhost.vue';
+import PickPlaceBar from '@/components/PickPlaceBar.vue';
 import { useSnapshot } from '@/canvas/useSnapshot';
 import ChangesModal from '@/components/ChangesModal.vue';
 import SearchBar, { type SearchTarget } from '@/components/SearchBar.vue';
@@ -46,6 +49,7 @@ const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 
 const snap = useSnapshot();
+const { layout, setLayout } = useBoardLayout();
 
 useConnectionWatcher([
   () => elders.fetch(),
@@ -190,6 +194,9 @@ function gotoSearchTarget(target: SearchTarget) {
     `[data-companionship-id="${target.companionshipId}"]`,
   );
   if (!cardEl) return;
+  if (layout.value === 'grid') {
+    cardEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
   const x = Number(cardEl.dataset.x ?? 0);
   const y = Number(cardEl.dataset.y ?? 0);
   const w = Number(cardEl.dataset.w ?? cardEl.offsetWidth);
@@ -391,6 +398,17 @@ const isEmptyCanvas = computed(
         </button>
       </div>
       <div class="flex items-center gap-2">
+        <div class="flex rounded border border-stone-300 p-0.5 text-sm">
+          <button
+            v-for="opt in (['canvas', 'grid'] as const)"
+            :key="opt"
+            class="rounded-sm px-2.5 py-0.5 capitalize"
+            :class="layout === opt ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-100'"
+            @click="setLayout(opt)"
+          >
+            {{ opt }}
+          </button>
+        </div>
         <input
           ref="uploadInput"
           type="file"
@@ -447,6 +465,7 @@ const isEmptyCanvas = computed(
             </p>
           </div>
         </div>
+        <CardGrid v-else-if="layout === 'grid'" />
         <Canvas v-else ref="canvasRef">
           <District
             v-for="d in districts.items"
@@ -476,6 +495,7 @@ const isEmptyCanvas = computed(
       @close="settingsMenuOpen = false"
     />
     <TransferGhost />
+    <PickPlaceBar />
     <ErrorToasts />
   </div>
 </template>

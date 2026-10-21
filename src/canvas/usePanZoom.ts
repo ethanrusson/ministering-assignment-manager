@@ -15,7 +15,7 @@ import { reactive, watch } from 'vue';
 
 export const ZOOM_MIN = 0.25;
 export const ZOOM_MAX = 2.0;
-const ZOOM_STEP = 1.1;
+export const ZOOM_STEP = 1.1;
 
 interface Viewport {
   tx: number;

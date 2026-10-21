@@ -12,6 +12,7 @@ import {
 import { useCardDrag } from './useCardDrag';
 import { useTransfer } from './useTransfer';
 import { useViewMode } from './useViewMode';
+import { usePickPlace } from '@/lib/usePickPlace';
 import { useDragPreview } from './dragPreview';
 import { useSnapshot } from './useSnapshot';
 import {
@@ -35,7 +36,10 @@ type CompanionshipRow = Database['public']['Tables']['companionships']['Row'];
 const props = defineProps<{
   companionship: CompanionshipRow;
   scale: number;
+  /** 'grid' renders in normal flow inside CardGrid: no positioning, no move. */
+  layout?: 'canvas' | 'grid';
 }>();
+const isGrid = computed(() => props.layout === 'grid');
 
 const companionships = useCompanionshipsStore();
 const districts = useDistrictsStore();
@@ -44,6 +48,7 @@ const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const transfer = useTransfer();
 const { locked } = useViewMode();
+const pickPlace = usePickPlace();
 const dragPreview = useDragPreview();
 const snap = useSnapshot();
 
@@ -217,9 +222,15 @@ const isHovered = computed(
     transfer.state.hoveredDropZone?.id === props.companionship.id,
 );
 
+/** Carrying something this card could take. */
+const canTake = computed(() =>
+  pickPlace.canAccept({ kind: 'companionship', id: props.companionship.id }),
+);
+
 const cardClasses = computed(() => {
   const bgClass = hasChanges.value ? 'bg-blue-50' : 'bg-stone-100';
   if (isHovered.value) return 'ring-2 ring-emerald-400 bg-emerald-50';
+  if (canTake.value) return 'ring-2 ring-emerald-400 bg-emerald-50/50';
   if (severity.value === 'danger') return `${bgClass} ring-2 ring-danger-400`;
   if (severity.value === 'warn') return `${bgClass} ring-2 ring-warn-400`;
   return bgClass;
@@ -237,7 +248,8 @@ const transitionStyle = computed(() =>
 let observer: ResizeObserver | null = null;
 
 onMounted(() => {
-  if (!cardEl.value) return;
+  // Grid cards are a different width; their heights would skew the canvas pack.
+  if (!cardEl.value || isGrid.value) return;
   // contentRect.height excludes border/margin; use offsetHeight for true visual.
   const updateHeight = () => {
     if (!cardEl.value) return;
@@ -296,10 +308,11 @@ function updatePreview(p: { x: number; y: number }) {
 
 /** Start an elder/household transfer drag off a chip.
  *
- * In view mode this is a no-op *and* lets the event bubble, so the touch
- * reaches the canvas and pans instead of picking the chip up. */
+ * In view mode, or while a subject is already in hand, this is a no-op *and*
+ * lets the event bubble, so the touch reaches the canvas and pans instead of
+ * picking the chip up. */
 function onTransferDown(e: PointerEvent, kind: 'elder' | 'household', id: string) {
-  if (locked.value) return;
+  if (locked.value || pickPlace.holding.value) return;
   e.stopPropagation();
   transfer.startDrag(e, kind, id);
 }
@@ -340,17 +353,18 @@ function onCardPointerDown(e: PointerEvent) {
     longPressTimer = null;
   }, 500);
 }
-function cancelLongPress(e?: PointerEvent) {
-  if (longPressTimer !== null) {
-    if (e && longPressStart) {
-      const dx = e.clientX - longPressStart.x;
-      const dy = e.clientY - longPressStart.y;
-      if (Math.hypot(dx, dy) < 8) return; // movement under threshold — keep timer
-    }
-    window.clearTimeout(longPressTimer);
-    longPressTimer = null;
-    longPressStart = null;
-  }
+function endLongPress() {
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+  longPressTimer = null;
+  longPressStart = null;
+}
+
+/** Finger wandered far enough that this is a drag, not a press — drop it. */
+function onLongPressMove(e: PointerEvent) {
+  if (longPressTimer === null || !longPressStart) return;
+  const dx = e.clientX - longPressStart.x;
+  const dy = e.clientY - longPressStart.y;
+  if (Math.hypot(dx, dy) >= 8) endLongPress();
 }
 
 async function deleteCard() {
@@ -378,9 +392,7 @@ const menuItems = computed<MenuItem[]>(() => {
   return items;
 });
 
-onBeforeUnmount(() => {
-  if (longPressTimer !== null) window.clearTimeout(longPressTimer);
-});
+onBeforeUnmount(endLongPress);
 
 const startMove = makeStart(dragOriginPos, {
   shouldStart: (e) => {
@@ -486,24 +498,23 @@ const startMove = makeStart(dragOriginPos, {
 <template>
   <div
     ref="cardEl"
-    class="absolute flex flex-col overflow-hidden rounded-2xl border-2 border-stone-400/40 select-none"
-    :class="[cardClasses, dragging ? 'shadow-lg' : '']"
-    :style="`left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
-    data-card
-    data-bbox
-    :data-x="x"
-    :data-y="y"
-    :data-w="CARD_W"
-    :data-h="measuredHeight"
+    class="flex flex-col overflow-hidden rounded-2xl border-2 border-stone-400/40 select-none"
+    :class="[isGrid ? 'relative' : 'absolute', cardClasses, dragging ? 'shadow-lg' : '']"
+    :style="isGrid ? '' : `left:${x}px; top:${y}px; width:${CARD_W}px; ${transitionStyle}`"
+    v-bind="
+      isGrid
+        ? {}
+        : { 'data-card': '', 'data-bbox': '', 'data-x': x, 'data-y': y, 'data-w': CARD_W, 'data-h': measuredHeight }
+    "
     data-drop-zone="companionship"
     :data-companionship-id="companionship.id"
     @pointerenter="transfer.setHover('companionship', companionship.id)"
     @pointerleave="transfer.clearHover('companionship', companionship.id)"
     @contextmenu="onContextMenu"
     @pointerdown="onCardPointerDown"
-    @pointermove="cancelLongPress"
-    @pointerup="cancelLongPress"
-    @pointercancel="cancelLongPress"
+    @pointermove="onLongPressMove"
+    @pointerup="endLongPress"
+    @pointercancel="endLongPress"
   >
     <!-- Three-dot menu (top-right) — edit mode only -->
     <button
@@ -519,10 +530,10 @@ const startMove = makeStart(dragOriginPos, {
     </button>
 
     <!-- Drag handle — centered on card surface, no background strip.
-         Hidden in view mode: nothing to grab, and the top of the card
-         becomes plain pan surface. -->
+         Hidden in view mode (nothing to grab; the top of the card becomes
+         plain pan surface) and in the grid, where cards don't move. -->
     <div
-      v-if="!locked"
+      v-if="!locked && !isGrid"
       class="flex shrink-0 cursor-grab items-center justify-center pb-1 pt-2 active:cursor-grabbing"
       @pointerdown.stop="startMove"
     >
@@ -533,7 +544,7 @@ const startMove = makeStart(dragOriginPos, {
     </div>
 
     <!-- Elders -->
-    <div class="px-3 pb-3" :class="locked ? 'pt-3' : ''">
+    <div class="px-3 pb-3" :class="locked || isGrid ? 'pt-3' : ''">
       <p class="mb-2 text-xs text-stone-400">Elders · {{ elderRows.length }}</p>
       <div class="flex flex-wrap gap-1.5">
         <span

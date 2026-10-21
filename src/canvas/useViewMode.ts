@@ -14,6 +14,7 @@
 // The choice is remembered per-device, not per-ward.
 
 import { readonly, ref, watch } from 'vue';
+import { cancel as dropHeldSubject } from '@/lib/usePickPlace';
 
 const STORAGE_KEY = 'canvasMode';
 
@@ -39,6 +40,8 @@ function initialLocked(): boolean {
 const locked = ref(initialLocked());
 
 watch(locked, (v) => {
+  // View mode is read-only, so nothing may still be in hand once it's on.
+  if (v) dropHeldSubject();
   try {
     localStorage.setItem(STORAGE_KEY, v ? 'view' : 'edit');
   } catch {

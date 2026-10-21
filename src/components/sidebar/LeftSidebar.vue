@@ -5,6 +5,8 @@ import { useHouseholdsStore } from '@/stores/households';
 import { useLabelsStore } from '@/stores/labels';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useTransfer } from '@/canvas/useTransfer';
+import { usePickPlace } from '@/lib/usePickPlace';
+import { useSidebar } from './useSidebar';
 import AgeBadge from '@/components/AgeBadge.vue';
 import LabelChip from '@/components/LabelChip.vue';
 import {
@@ -24,15 +26,9 @@ const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const companionships = useCompanionshipsStore();
 const transfer = useTransfer();
+const pickPlace = usePickPlace();
 
-// The panel is a 320px overlay, which covers a phone screen whole — start it
-// collapsed there so the canvas is what you land on. innerWidth reads 0 in
-// some offscreen/headless contexts; treat an unknown width as desktop.
-const isNarrowScreen =
-  typeof window !== 'undefined' &&
-  window.innerWidth > 0 &&
-  window.innerWidth < 640;
-const sidebarOpen = ref(!isNarrowScreen);
+const { open: sidebarOpen } = useSidebar();
 const eldersOpen = ref(true);
 const householdsOpen = ref(true);
 
@@ -84,7 +80,11 @@ async function removeElder(id: string, name: string) {
   await elders.remove(id);
 }
 
-const eldersHovered = computed(() => transfer.state.hoveredDropZone?.kind === 'sidebar-elders');
+const eldersHovered = computed(
+  () =>
+    transfer.state.hoveredDropZone?.kind === 'sidebar-elders' ||
+    (pickPlace.held.value?.kind === 'elder' && pickPlace.canAccept({ kind: 'unassigned' })),
+);
 
 // ── Households ────────────────────────────────────────────────────────────
 
@@ -166,7 +166,9 @@ async function removeHousehold(id: string, name: string) {
 }
 
 const householdsHovered = computed(
-  () => transfer.state.hoveredDropZone?.kind === 'sidebar-households',
+  () =>
+    transfer.state.hoveredDropZone?.kind === 'sidebar-households' ||
+    (pickPlace.held.value?.kind === 'household' && pickPlace.canAccept({ kind: 'unassigned' })),
 );
 </script>
 

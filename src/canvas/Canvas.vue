@@ -21,12 +21,14 @@ import { useAuthStore } from "@/stores/auth";
 import { usePanZoom, ZOOM_MAX, ZOOM_MIN } from "./usePanZoom";
 import { createBlankCardAt, setLayoutPreserver } from "@/lib/assignment";
 import { pushError } from "@/lib/errorToast";
+import { usePickPlace } from "@/lib/usePickPlace";
 import { useViewMode } from "./useViewMode";
 import CardContextMenu, { type MenuItem } from "./CardContextMenu.vue";
 import { HandRaisedIcon, PencilSquareIcon, PlusIcon } from "@heroicons/vue/24/outline";
 
 const auth = useAuthStore();
 const { locked, toggle: toggleMode } = useViewMode();
+const pickPlace = usePickPlace();
 const root = ref<HTMLDivElement | null>(null);
 const {
   state: viewport,
@@ -49,9 +51,10 @@ function isCardTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   // Floating UI chrome is never a pan surface, in either mode.
   if (t.closest("[data-no-pan]")) return true;
-  // View mode: nothing on the canvas is draggable, so every other target —
-  // cards included — is fair game for a pan.
-  if (locked.value) return false;
+  // View mode, or carrying a subject: nothing on the canvas is draggable, so
+  // every other target — cards included — is fair game for a pan. Carrying
+  // needs this most: reaching an off-screen card is the whole point.
+  if (locked.value || pickPlace.holding.value) return false;
   return !!t.closest("[data-card], [data-district-handle]");
 }
 
@@ -85,7 +88,8 @@ function onPointerDown(e: PointerEvent) {
   // on empty space pans — drag-cards rule above already exits early for cards).
   const isPanIntent =
     e.button === 1 || // middle click
-    (e.pointerType === "mouse" && (spaceHeld || locked.value)) ||
+    (e.pointerType === "mouse" &&
+      (spaceHeld || locked.value || pickPlace.holding.value)) ||
     e.pointerType === "touch" ||
     e.pointerType === "pen";
 

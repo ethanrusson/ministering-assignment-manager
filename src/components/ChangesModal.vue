@@ -1,36 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { useCompanionshipsStore } from '@/stores/companionships';
-import { useEldersStore } from '@/stores/elders';
-import { useHouseholdsStore } from '@/stores/households';
-import { useDistrictsStore } from '@/stores/districts';
-import { useSnapshot } from '@/canvas/useSnapshot';
-import { generateChangeList, changeListToText } from '@/lib/changeList';
+import { useChangeList } from '@/canvas/useChangeList';
+import { changeListToText } from '@/lib/changeList';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
-const companionships = useCompanionshipsStore();
-const elders = useEldersStore();
-const households = useHouseholdsStore();
-const districts = useDistrictsStore();
-const snap = useSnapshot();
+const { groups } = useChangeList();
 
 const copied = ref(false);
-
-const groups = computed(() => {
-  if (!snap.snapshot.value) return [];
-  return generateChangeList(
-    snap.snapshot.value,
-    companionships.elderLinks,
-    companionships.householdLinks,
-    elders.byId,
-    households.byId,
-    companionships.items,
-    companionships.eldersInCompanionship,
-    districts.items,
-  );
-});
 
 const hasChanges = computed(() => groups.value.length > 0);
 

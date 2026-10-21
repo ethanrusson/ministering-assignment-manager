@@ -43,9 +43,15 @@ const matches = computed<SearchTarget[]>(() => {
   return props.targets.filter((t) => t.name.toLowerCase().includes(q));
 });
 
-watch(matches, (m) => {
+// Only typing jumps to the first match. `matches` also recomputes whenever
+// the stores change (e.g. realtime updates), which must not move the view.
+watch(query, () => {
   cursor.value = 0;
-  if (m.length) emit('goto', m[0]);
+  if (matches.value.length) emit('goto', matches.value[0]);
+});
+
+watch(matches, (m) => {
+  if (cursor.value >= m.length) cursor.value = Math.max(0, m.length - 1);
 });
 
 // The bar stays mounted (just invisible) and focus happens synchronously, so

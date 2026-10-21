@@ -18,6 +18,7 @@ import { useBoardLayout } from '@/canvas/useBoardLayout';
 import TransferGhost from '@/canvas/TransferGhost.vue';
 import PickPlaceBar from '@/components/PickPlaceBar.vue';
 import { useSnapshot } from '@/canvas/useSnapshot';
+import { useChangeList } from '@/canvas/useChangeList';
 import ChangesModal from '@/components/ChangesModal.vue';
 import SearchBar, { type SearchTarget } from '@/components/SearchBar.vue';
 import ErrorToasts from '@/components/ErrorToasts.vue';
@@ -32,6 +33,9 @@ import {
   Cog6ToothIcon,
   SparklesIcon,
   MagnifyingGlassIcon,
+  CameraIcon,
+  XMarkIcon,
+  ClockIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -50,6 +54,7 @@ const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 
 const snap = useSnapshot();
+const { count: changeCount } = useChangeList();
 const { layout, setLayout } = useBoardLayout();
 
 useConnectionWatcher([
@@ -287,6 +292,12 @@ const settingsMenuItems = computed<MenuItem[]>(() => {
     { label: 'Clean up canvas', icon: SparklesIcon, onClick: cleanUp },
     { label: 'Download backup', icon: DocumentArrowDownIcon, onClick: downloadBackup },
   ];
+  if (snap.hasSnapshot.value) {
+    items.push({ label: 'Update snapshot', icon: CameraIcon, onClick: saveCurrentSnapshot });
+    items.push({ label: 'Clear snapshot', icon: XMarkIcon, onClick: clearCurrentSnapshot });
+  } else {
+    items.push({ label: 'Save snapshot', icon: CameraIcon, onClick: saveCurrentSnapshot });
+  }
   if (auth.wardRole === 'admin') {
     items.push({ label: 'Upload backup', icon: DocumentArrowUpIcon, onClick: pickBackupFile });
     items.push({ label: 'Invite member', icon: UserPlusIcon, onClick: () => { inviteOpen.value = true; } });
@@ -333,7 +344,6 @@ const isEmptyCanvas = computed(
     <header
       class="flex items-center justify-between border-b border-stone-200 bg-stone-100 px-4 py-2"
     >
-      <!-- Left cluster: ward name + snapshot/changes -->
       <div class="flex items-center gap-3">
         <div class="group flex items-center gap-1.5">
           <input
@@ -364,39 +374,6 @@ const isEmptyCanvas = computed(
             </button>
           </template>
         </div>
-        <!-- Snapshot controls — active state when a snapshot is saved -->
-        <div v-if="snap.hasSnapshot.value" class="flex items-center gap-1">
-          <button
-            class="rounded border border-blue-300 bg-blue-100 px-3 py-1 text-sm text-blue-700 hover:bg-blue-200"
-            title="Replace the current snapshot with the latest state"
-            @click="saveCurrentSnapshot"
-          >
-            Update Snapshot
-          </button>
-          <button
-            class="rounded border border-blue-300 bg-blue-100 px-1.5 py-1 text-sm text-blue-500 hover:bg-blue-200"
-            title="Clear snapshot"
-            @click="clearCurrentSnapshot"
-          >
-            ×
-          </button>
-        </div>
-        <button
-          v-else
-          class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-50"
-          title="Save the current assignment state as a baseline for change tracking"
-          @click="saveCurrentSnapshot"
-        >
-          Save Snapshot
-        </button>
-        <!-- Changes button — only visible when a snapshot is active -->
-        <button
-          v-if="snap.hasSnapshot.value"
-          class="rounded border border-blue-300 bg-blue-50 px-3 py-1 text-sm text-blue-700 hover:bg-blue-100"
-          @click="changesOpen = true"
-        >
-          Changes
-        </button>
       </div>
       <div class="flex items-center gap-2">
         <div class="flex rounded border border-stone-300 p-0.5 text-sm">
@@ -425,7 +402,22 @@ const isEmptyCanvas = computed(
         >
           <MagnifyingGlassIcon class="h-4 w-4" />
         </button>
-        <!-- Settings (combines Labels, Import, Download/Upload backup, Invite) -->
+        <button
+          v-if="snap.hasSnapshot.value"
+          class="relative rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
+          title="Changes since snapshot"
+          aria-label="Changes since snapshot"
+          @click="changesOpen = true"
+        >
+          <ClockIcon class="h-4 w-4" />
+          <span
+            v-if="changeCount > 0"
+            class="absolute -right-1.5 -top-1.5 min-w-4 rounded-full bg-blue-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+          >
+            {{ changeCount }}
+          </span>
+        </button>
+        <!-- Settings (combines Labels, Import, Snapshot, Download/Upload backup, Invite) -->
         <button
           class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"
           title="Settings"

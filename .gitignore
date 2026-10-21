@@ -25,3 +25,6 @@ supabase/.temp/
 docs/lcr.html
 docs/lcr-*.html
 docs/lcr-*.rtf
+
+# Claude Code local settings
+.claude/

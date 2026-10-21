@@ -8,7 +8,7 @@
 // own (x, y) plus the masonry pack — so when the district moves, member cards
 // follow automatically without any per-card update.
 
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useCardDrag } from './useCardDrag';
@@ -82,6 +82,9 @@ const packed1 = computed(() => {
 });
 
 const h = computed(() => districtRenderHeight(packed0.value, packed1.value));
+
+watch(h, (v) => districts.setRenderedHeight(props.district.id, v), { immediate: true });
+onBeforeUnmount(() => districts.clearRenderedHeight(props.district.id));
 
 // Placeholder rendering position — relative to district top-left.
 const placeholderRect = computed(() => {

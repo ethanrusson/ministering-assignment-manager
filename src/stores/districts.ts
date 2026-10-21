@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia';
-import { computed, onScopeDispose, ref } from 'vue';
+import { computed, onScopeDispose, reactive, ref } from 'vue';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
 import { subscribeToTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
+import { DISTRICT_WIDTH, isPointInDistrict } from '@/canvas/layout';
 
 export type District = Database['public']['Tables']['districts']['Row'];
 
@@ -13,6 +14,33 @@ export const useDistrictsStore = defineStore('districts', () => {
   const loaded = ref(false);
   let channel: RealtimeChannel | null = null;
   const byId = computed(() => new Map(items.value.map((d) => [d.id, d])));
+
+  /**
+   * District id → rendered height (px), published by each District as its
+   * masonry columns pack. The stored `height` column is only an import-time
+   * estimate, so hit-testing must use this instead.
+   */
+  const renderedHeightById = reactive(new Map<string, number>());
+
+  function setRenderedHeight(id: string, h: number) {
+    if (renderedHeightById.get(id) !== h) renderedHeightById.set(id, h);
+  }
+
+  function clearRenderedHeight(id: string) {
+    renderedHeightById.delete(id);
+  }
+
+  /** The district whose rendered bounds contain a world-space point. */
+  function districtAt(pt: { x: number; y: number }) {
+    return items.value.find((d) =>
+      isPointInDistrict(pt, {
+        position_x: d.position_x,
+        position_y: d.position_y,
+        width: DISTRICT_WIDTH,
+        height: renderedHeightById.get(d.id) ?? d.height,
+      }),
+    );
+  }
 
   async function fetch() {
     const { data, error } = await supabase
@@ -72,5 +100,17 @@ export const useDistrictsStore = defineStore('districts', () => {
     items.value = items.value.filter((d) => d.id !== id);
   }
 
-  return { items, byId, loaded, fetch, add, update, remove };
+  return {
+    items,
+    byId,
+    loaded,
+    renderedHeightById,
+    setRenderedHeight,
+    clearRenderedHeight,
+    districtAt,
+    fetch,
+    add,
+    update,
+    remove,
+  };
 });

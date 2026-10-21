@@ -20,7 +20,6 @@ import {
   columnIndexForX,
   columnXForIndex,
   findInsertOrdinalY,
-  isPointInDistrict,
   packColumn,
   renormalizeColumnSortKeys,
   renderedPosition,
@@ -270,7 +269,7 @@ function dragOriginPos(): { x: number; y: number } {
 // Compute and publish the live drag preview based on current pointer (world-space).
 function updatePreview(p: { x: number; y: number }) {
   const center = { x: p.x + CARD_W / 2, y: p.y + measuredHeight.value / 2 };
-  const target = districts.items.find((d) => isPointInDistrict(center, d));
+  const target = districts.districtAt(center);
   if (!target) {
     dragPreview.clearPreview();
     return;
@@ -407,7 +406,7 @@ const startMove = makeStart(dragOriginPos, {
 
     // Drop test: which district (if any) contains the card's center?
     const center = { x: fx + CARD_W / 2, y: fy + measuredH / 2 };
-    const containingDistrict = districts.items.find((d) => isPointInDistrict(center, d));
+    const containingDistrict = districts.districtAt(center);
 
     try {
       if (!containingDistrict) {

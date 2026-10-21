@@ -19,9 +19,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { usePanZoom, ZOOM_MAX, ZOOM_MIN } from "./usePanZoom";
-import { setLayoutPreserver } from "@/lib/assignment";
+import { createBlankCardAt, setLayoutPreserver } from "@/lib/assignment";
+import { pushError } from "@/lib/errorToast";
 import { useViewMode } from "./useViewMode";
-import { HandRaisedIcon, PencilSquareIcon } from "@heroicons/vue/24/outline";
+import CardContextMenu, { type MenuItem } from "./CardContextMenu.vue";
+import { HandRaisedIcon, PencilSquareIcon, PlusIcon } from "@heroicons/vue/24/outline";
 
 const auth = useAuthStore();
 const { locked, toggle: toggleMode } = useViewMode();
@@ -53,7 +55,7 @@ function isCardTarget(t: EventTarget | null): boolean {
   return !!t.closest("[data-card], [data-district-handle]");
 }
 
-function localPoint(e: PointerEvent | WheelEvent) {
+function localPoint(e: MouseEvent) {
   const r = root.value!.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
@@ -142,6 +144,43 @@ function onWheel(e: WheelEvent) {
   }
   e.preventDefault();
 }
+
+// ─── Right-click on empty canvas ───────────────────────────────────────────
+
+const menu = ref<{ x: number; y: number; world: { x: number; y: number } } | null>(null);
+
+function onContextMenu(e: MouseEvent) {
+  // Cards open their own menu; floating chrome gets none.
+  if (locked.value || isCardTarget(e.target)) return;
+  e.preventDefault();
+  const p = localPoint(e);
+  menu.value = {
+    x: e.clientX,
+    y: e.clientY,
+    world: {
+      x: (p.x - viewport.tx) / viewport.scale,
+      y: (p.y - viewport.ty) / viewport.scale,
+    },
+  };
+}
+
+const menuItems = computed<MenuItem[]>(() => {
+  const world = menu.value?.world;
+  if (!world) return [];
+  return [
+    {
+      label: "New card",
+      icon: PlusIcon,
+      onClick: async () => {
+        try {
+          await createBlankCardAt(world);
+        } catch (e) {
+          pushError(e);
+        }
+      },
+    },
+  ];
+});
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.code === "Space") spaceHeld = true;
@@ -304,6 +343,7 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
     @pointerup="onPointerUp"
     @pointercancel="onPointerUp"
     @wheel.prevent="onWheel"
+    @contextmenu="onContextMenu"
   >
     <!-- World layer -->
     <div
@@ -386,5 +426,13 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
     </div>
 
     <slot name="overlay" />
+
+    <CardContextMenu
+      :open="!!menu"
+      :x="menu?.x ?? 0"
+      :y="menu?.y ?? 0"
+      :items="menuItems"
+      @close="menu = null"
+    />
   </div>
 </template>

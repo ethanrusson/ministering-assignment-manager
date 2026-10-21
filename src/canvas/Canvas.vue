@@ -23,12 +23,14 @@ import { createBlankCardAt, setLayoutPreserver } from "@/lib/assignment";
 import { pushError } from "@/lib/errorToast";
 import { usePickPlace } from "@/lib/usePickPlace";
 import { useViewMode } from "./useViewMode";
+import { useSidebar } from "@/components/sidebar/useSidebar";
 import CardContextMenu, { type MenuItem } from "./CardContextMenu.vue";
 import { HandRaisedIcon, PencilSquareIcon, PlusIcon } from "@heroicons/vue/24/outline";
 
 const auth = useAuthStore();
 const { locked, toggle: toggleMode } = useViewMode();
 const pickPlace = usePickPlace();
+const { toolbarCenterClass } = useSidebar();
 const root = ref<HTMLDivElement | null>(null);
 const {
   state: viewport,
@@ -360,7 +362,8 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
     <!-- Floating controls. Touch targets are 40px so they stay usable on a
          phone; the bar clears the iOS home indicator via safe-area inset. -->
     <div
-      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur"
+      class="pointer-events-auto absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur transition-[left] duration-200"
+      :class="toolbarCenterClass"
       style="bottom: max(1rem, env(safe-area-inset-bottom))"
       data-no-pan
     >

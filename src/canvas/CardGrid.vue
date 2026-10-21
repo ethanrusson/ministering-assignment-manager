@@ -21,7 +21,7 @@ import { PlusIcon } from '@heroicons/vue/24/outline';
 
 const companionships = useCompanionshipsStore();
 const districts = useDistrictsStore();
-const { open: sidebarOpen } = useSidebar();
+const { open: sidebarOpen, toolbarCenterClass } = useSidebar();
 const { gridZoom, setGridZoom } = useBoardLayout();
 
 // Same gesture as the canvas: trackpad pinch arrives as ctrl+wheel, and
@@ -91,7 +91,8 @@ const ordered = computed(() => {
     </div>
 
     <div
-      class="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur"
+      class="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-stone-200 bg-white/95 px-1.5 py-1 shadow-lg backdrop-blur transition-[left] duration-200"
+      :class="toolbarCenterClass"
       style="bottom: max(1rem, env(safe-area-inset-bottom))"
     >
       <button

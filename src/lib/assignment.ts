@@ -15,9 +15,13 @@ import { useDistrictsStore } from '@/stores/districts';
 import { pushError } from '@/lib/errorToast';
 import { findFreeSpot } from '@/canvas/autoNudge';
 import {
+  CARD_H,
+  ROW_GAP,
+  SORT_KEY_GAP,
   columnIndexForX,
   columnXForIndex,
   findInsertOrdinalY,
+  packColumn,
   renormalizeColumnSortKeys,
 } from '@/canvas/layout';
 
@@ -152,6 +156,34 @@ export async function createCompanionshipWith(elderIds: string[]) {
 }
 
 /**
+ * Create an empty companionship on open canvas below everything else, so it
+ * comes last in the grid's reading order (loose cards sort after districted
+ * ones, top to bottom).
+ */
+export async function createBlankCardAtEnd() {
+  const companionships = useCompanionshipsStore();
+  const districts = useDistrictsStore();
+  const boxes = [
+    ...districts.items.map((d) => ({
+      x: d.position_x,
+      bottom: d.position_y + (districts.renderedHeightById.get(d.id) ?? d.height),
+    })),
+    ...companionships.items
+      .filter((c) => !c.district_id)
+      .map((c) => ({
+        x: c.position_x,
+        bottom: c.position_y + (companionships.heightById.get(c.id) ?? CARD_H),
+      })),
+  ];
+  return companionships.create({
+    elderIds: [],
+    districtId: null,
+    position_x: boxes.length ? Math.min(...boxes.map((b) => b.x)) : NEW_CARD_ORIGIN.x,
+    position_y: boxes.length ? Math.max(...boxes.map((b) => b.bottom)) + ROW_GAP : NEW_CARD_ORIGIN.y,
+  });
+}
+
+/**
  * Create an empty companionship at a world-space point. Inside a district it
  * slots into the column and position under the point; on open canvas the
  * card's top-left lands on the point.
@@ -184,6 +216,66 @@ export async function createBlankCardAt(pt: { x: number; y: number }) {
     await companionships.updatePositionsBulk(renorm.map((r) => ({ ...r, position_x })));
   }
   return comp;
+}
+
+/**
+ * Move a card into a district, or out onto open canvas.
+ *
+ * Position fields don't survive the move: inside a district position_x is a
+ * column x and position_y a sort key, both relative to that district, so
+ * carrying them over would land the card in a nonsense column. The card is
+ * appended to whichever of the target's two columns is currently shorter.
+ */
+export async function moveToDistrict(
+  companionshipId: string,
+  districtId: string | null,
+) {
+  const companionships = useCompanionshipsStore();
+  const card = companionships.byId.get(companionshipId);
+  if (!card || card.district_id === districtId) return;
+
+  if (!districtId) {
+    // Out onto open canvas: real pixel coords, clear of the other cards.
+    const occupied = companionships.items
+      .filter((c) => c.id !== companionshipId)
+      .map((c) => ({ x: c.position_x, y: c.position_y, ...NEW_CARD_FOOTPRINT }));
+    const spot = findFreeSpot(NEW_CARD_ORIGIN, NEW_CARD_FOOTPRINT, occupied);
+    return companionships.update(companionshipId, {
+      district_id: null,
+      position_x: spot.x,
+      position_y: spot.y,
+    });
+  }
+
+  const district = useDistrictsStore().byId.get(districtId);
+  if (!district) throw new Error('No such district.');
+
+  const columnCards = (col: 0 | 1) =>
+    companionships.items
+      .filter(
+        (c) =>
+          c.district_id === districtId &&
+          c.id !== companionshipId &&
+          columnIndexForX(district, c.position_x) === col,
+      )
+      .map((c) => ({ id: c.id, position_y: c.position_y }));
+
+  const packedHeight = (col: 0 | 1) => {
+    const packed = packColumn(columnCards(col), companionships.heightById);
+    const last = packed[packed.length - 1];
+    return last ? last.yOffset + last.height : 0;
+  };
+
+  const col: 0 | 1 = packedHeight(1) < packedHeight(0) ? 1 : 0;
+  const lastSortKey = columnCards(col).reduce(
+    (max, c) => Math.max(max, c.position_y),
+    0,
+  );
+  return companionships.update(companionshipId, {
+    district_id: districtId,
+    position_x: columnXForIndex(district, col),
+    position_y: lastSortKey + SORT_KEY_GAP,
+  });
 }
 
 /**

@@ -13,6 +13,9 @@ import { useCardDrag } from './useCardDrag';
 import { useTransfer } from './useTransfer';
 import { useViewMode } from './useViewMode';
 import { usePickPlace } from '@/lib/usePickPlace';
+import { moveToDistrict } from '@/lib/assignment';
+import { pushError } from '@/lib/errorToast';
+import { districtClasses, districtLabel } from './districtColors';
 import { useDragPreview } from './dragPreview';
 import { useSnapshot } from './useSnapshot';
 import {
@@ -317,6 +320,51 @@ function onTransferDown(e: PointerEvent, kind: 'elder' | 'household', id: string
   transfer.startDrag(e, kind, id);
 }
 
+// ─── District badge (grid only) ────────────────────────────────────────────
+//
+// On the canvas a card sits physically inside its district, so the badge is
+// only worth the space in the grid, where that grouping isn't visible.
+
+/** Index of this card's district in the list; -1 when it has none. */
+const districtRank = computed(() =>
+  districts.items.findIndex((d) => d.id === props.companionship.district_id),
+);
+
+const badgeLabel = computed(() => districtLabel(districtRank.value));
+const badgeClasses = computed(() => districtClasses(districtRank.value));
+const badgeTitle = computed(() =>
+  districtRank.value < 0
+    ? 'No district — click to choose'
+    : `${districts.items[districtRank.value].name} — click to change`,
+);
+
+const districtMenuOpen = ref(false);
+const districtMenuX = ref(0);
+const districtMenuY = ref(0);
+
+function openDistrictMenu(e: Event) {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  districtMenuX.value = r.right - 200;
+  districtMenuY.value = r.bottom + 4;
+  districtMenuOpen.value = true;
+}
+
+async function chooseDistrict(districtId: string | null) {
+  try {
+    await moveToDistrict(props.companionship.id, districtId);
+  } catch (e) {
+    pushError(e);
+  }
+}
+
+const districtMenuItems = computed<MenuItem[]>(() => [
+  ...districts.items.map((d, i) => ({
+    label: `${districtLabel(i)} · ${d.name}`,
+    onClick: () => chooseDistrict(d.id),
+  })),
+  { label: 'No district', onClick: () => chooseDistrict(null) },
+]);
+
 // ─── Context menu ──────────────────────────────────────────────────────────
 
 const menuOpen = ref(false);
@@ -516,18 +564,30 @@ const startMove = makeStart(dragOriginPos, {
     @pointerup="endLongPress"
     @pointercancel="endLongPress"
   >
-    <!-- Three-dot menu (top-right) — edit mode only -->
-    <button
-      v-if="!locked"
-      class="absolute right-1.5 top-1.5 z-10 rounded-md p-1 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700"
-      data-no-pan
-      title="Card actions"
-      aria-label="Card actions"
-      @pointerdown.stop
-      @click.stop="openMenuFromButton"
-    >
-      <EllipsisVerticalIcon class="h-4 w-4" />
-    </button>
+    <!-- Top-right controls: district badge (grid only) + card actions -->
+    <div class="absolute right-1.5 top-1.5 z-10 flex items-center gap-1" data-no-pan>
+      <button
+        v-if="isGrid"
+        class="rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-none ring-1 ring-inset disabled:cursor-default"
+        :class="badgeClasses"
+        :disabled="locked"
+        :title="locked ? badgeTitle.split(' — ')[0] : badgeTitle"
+        @pointerdown.stop
+        @click.stop="openDistrictMenu"
+      >
+        {{ badgeLabel }}
+      </button>
+      <button
+        v-if="!locked"
+        class="rounded-md p-1 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700"
+        title="Card actions"
+        aria-label="Card actions"
+        @pointerdown.stop
+        @click.stop="openMenuFromButton"
+      >
+        <EllipsisVerticalIcon class="h-4 w-4" />
+      </button>
+    </div>
 
     <!-- Drag handle — centered on card surface, no background strip.
          Hidden in view mode (nothing to grab; the top of the card becomes
@@ -603,6 +663,14 @@ const startMove = makeStart(dragOriginPos, {
         </li>
       </ul>
     </div>
+
+    <CardContextMenu
+      :open="districtMenuOpen"
+      :x="districtMenuX"
+      :y="districtMenuY"
+      :items="districtMenuItems"
+      @close="districtMenuOpen = false"
+    />
 
     <CardContextMenu
       :open="menuOpen"

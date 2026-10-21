@@ -31,6 +31,7 @@ import {
   ArrowRightOnRectangleIcon,
   Cog6ToothIcon,
   SparklesIcon,
+  MagnifyingGlassIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -416,6 +417,14 @@ const isEmptyCanvas = computed(
           class="hidden"
           @change="onBackupFileChosen"
         />
+        <button
+          class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800"
+          title="Search (⌘F)"
+          aria-label="Search"
+          @click="searchOpen = true"
+        >
+          <MagnifyingGlassIcon class="h-4 w-4" />
+        </button>
         <!-- Settings (combines Labels, Import, Download/Upload backup, Invite) -->
         <button
           class="rounded border border-stone-300 p-1.5 text-stone-600 hover:bg-stone-50 hover:text-stone-800 disabled:opacity-50"

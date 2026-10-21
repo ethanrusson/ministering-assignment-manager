@@ -8,7 +8,7 @@
 //   - a callback to zoom + highlight a target
 // Search filtering and navigation live here; nothing about Canvas internals.
 
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   MagnifyingGlassIcon,
   XMarkIcon,
@@ -48,11 +48,13 @@ watch(matches, (m) => {
   if (m.length) emit('goto', m[0]);
 });
 
+// The bar stays mounted (just invisible) and focus happens synchronously, so
+// when `open` flips inside a tap handler iOS still treats the focus as
+// user-initiated and raises the on-screen keyboard.
 watch(
   () => props.open,
-  async (open) => {
+  (open) => {
     if (open) {
-      await nextTick();
       inputEl.value?.focus();
       inputEl.value?.select();
     } else {
@@ -60,6 +62,7 @@ watch(
       cursor.value = 0;
     }
   },
+  { flush: 'sync' },
 );
 
 function next() {
@@ -89,8 +92,9 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <div
-    v-if="open"
     class="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-lg border border-stone-300 bg-white px-2 py-1.5 shadow-lg"
+    :class="open ? '' : 'pointer-events-none opacity-0'"
+    :aria-hidden="!open"
   >
     <MagnifyingGlassIcon class="h-4 w-4 text-stone-400" />
     <input
@@ -99,6 +103,7 @@ function onKey(e: KeyboardEvent) {
       type="text"
       placeholder="Search elders & households"
       class="w-56 bg-transparent text-sm focus:outline-none"
+      :tabindex="open ? 0 : -1"
       @keydown="onKey"
     />
     <span class="min-w-[3rem] text-right text-xs tabular-nums text-stone-500">
@@ -107,6 +112,7 @@ function onKey(e: KeyboardEvent) {
       </template>
     </span>
     <button
+      :tabindex="open ? 0 : -1"
       class="rounded p-1 text-stone-500 hover:bg-stone-100 disabled:opacity-30"
       title="Previous match"
       :disabled="!matches.length"
@@ -115,6 +121,7 @@ function onKey(e: KeyboardEvent) {
       <ChevronUpIcon class="h-4 w-4" />
     </button>
     <button
+      :tabindex="open ? 0 : -1"
       class="rounded p-1 text-stone-500 hover:bg-stone-100 disabled:opacity-30"
       title="Next match"
       :disabled="!matches.length"
@@ -123,6 +130,7 @@ function onKey(e: KeyboardEvent) {
       <ChevronDownIcon class="h-4 w-4" />
     </button>
     <button
+      :tabindex="open ? 0 : -1"
       class="rounded p-1 text-stone-500 hover:bg-stone-100"
       title="Close (Esc)"
       @click="emit('close')"

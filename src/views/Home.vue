@@ -23,6 +23,7 @@ import ChangesModal from '@/components/ChangesModal.vue';
 import SearchBar, { type SearchTarget } from '@/components/SearchBar.vue';
 import ErrorToasts from '@/components/ErrorToasts.vue';
 import { useConnectionWatcher } from '@/lib/connectionWatcher';
+import { useTheme } from '@/lib/useTheme';
 import {
   TagIcon,
   ArrowDownTrayIcon,
@@ -36,6 +37,8 @@ import {
   CameraIcon,
   XMarkIcon,
   ClockIcon,
+  MoonIcon,
+  SunIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -56,6 +59,7 @@ const companionships = useCompanionshipsStore();
 const snap = useSnapshot();
 const { count: changeCount } = useChangeList();
 const { layout, setLayout } = useBoardLayout();
+const theme = useTheme();
 
 useConnectionWatcher([
   () => elders.fetch(),
@@ -291,6 +295,9 @@ const settingsMenuItems = computed<MenuItem[]>(() => {
     { label: 'Import LCR HTML', icon: ArrowDownTrayIcon, onClick: () => { importOpen.value = true; } },
     { label: 'Clean up canvas', icon: SparklesIcon, onClick: cleanUp },
     { label: 'Download backup', icon: DocumentArrowDownIcon, onClick: downloadBackup },
+    theme.isDark.value
+      ? { label: 'Light mode', icon: SunIcon, onClick: theme.toggle }
+      : { label: 'Dark mode', icon: MoonIcon, onClick: theme.toggle },
   ];
   if (snap.hasSnapshot.value) {
     items.push({ label: 'Update snapshot', icon: CameraIcon, onClick: saveCurrentSnapshot });

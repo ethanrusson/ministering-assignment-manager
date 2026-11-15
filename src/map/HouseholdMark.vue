@@ -9,6 +9,8 @@ export interface Mark {
   /** 'minister': an elder with a companionship lives here; 'free': one without. */
   elder: 'minister' | 'free' | null;
   labelColors: string[];
+  /** Overrides the district colors ("Color by" status or a label): CSS colors. */
+  paint?: { fill: string; border: string };
 }
 
 const props = defineProps<{ mark: Mark; size: number; selected?: boolean }>();
@@ -19,15 +21,16 @@ const v = (name: string) => `rgb(var(--c-${name}))`;
 
 const style = () => {
   const f = props.mark.family;
+  const paint = props.mark.paint;
   return {
     width: `${props.size}px`,
     height: `${props.size}px`,
     borderWidth: props.size > 16 ? '2px' : '1.5px',
-    borderStyle: f ? 'solid' : 'dashed',
-    borderColor: v(f ? `${f}-500` : 'stone-500'),
-    backgroundColor: v(
-      props.mark.hasCompanionship ? (f ? `${f}-200` : 'stone-200') : 'white',
-    ),
+    borderStyle: f || paint ? 'solid' : 'dashed',
+    borderColor: paint?.border ?? v(f ? `${f}-500` : 'stone-500'),
+    backgroundColor:
+      paint?.fill ??
+      v(props.mark.hasCompanionship ? (f ? `${f}-200` : 'stone-200') : 'white'),
     boxShadow: props.selected
       ? `0 0 0 2px ${v('white')}, 0 0 0 4px ${v('stone-900')}`
       : undefined,

@@ -12,6 +12,8 @@ import {
 } from './geo';
 import { fitLabels } from './labels';
 import { homesToDraw, parseHouses } from './homes';
+import { emptyFilters, matches, statusOf } from './mapFilters';
+import type { HouseholdFlag } from '@/lib/flags';
 import { overpassQuery, parseOverpass, placeStreetLabels, simplify } from './streets';
 import { allConnections, buildConnections, type MinisteringModel } from './connections';
 
@@ -301,5 +303,32 @@ describe('homes', () => {
   it('hides homes under a member household', () => {
     const homes = [{ id: 'near', p: { x: 10, y: 10 } }, { id: 'far', p: { x: 100, y: 0 } }];
     expect(homesToDraw(homes, [{ x: 0, y: 0 }]).map((h) => h.id)).toEqual(['far']);
+  });
+});
+
+describe('map filters', () => {
+  const h = (labelIds: string[], flags: HouseholdFlag[], districtRank: number) => ({ labelIds, flags, districtRank });
+
+  it('matches everything with no filter', () => {
+    expect(matches(emptyFilters(), h([], [], -1))).toBe(true);
+  });
+
+  it('ORs within a type and ANDs across types', () => {
+    const f = { ...emptyFilters(), labels: new Set(['widow', 'less']), districts: new Set([0]) };
+    expect(matches(f, h(['less'], [], 0))).toBe(true);
+    expect(matches(f, h(['less'], [], 1))).toBe(false);
+    expect(matches(f, h([], [], 0))).toBe(false);
+  });
+
+  it('filters by flag', () => {
+    const f = { ...emptyFilters(), flags: new Set<HouseholdFlag>(['no_companionship']) };
+    expect(matches(f, h([], ['no_companionship', 'no_location'], -1))).toBe(true);
+    expect(matches(f, h([], ['far_from_ministers'], 0))).toBe(false);
+  });
+
+  it('colors by the most pressing status', () => {
+    expect(statusOf(['location_changed', 'no_companionship'])).toBe('no_companionship');
+    expect(statusOf(['location_changed', 'far_from_ministers'])).toBe('far_from_ministers');
+    expect(statusOf(['new_since_import'])).toBe('ok');
   });
 });

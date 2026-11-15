@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useLabelsStore } from '@/stores/labels';
+import { useLabelsStore, type Label } from '@/stores/labels';
+import { LABEL_PALETTE } from '@/lib/labelColors';
+import { pushError } from '@/lib/errorToast';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -8,41 +10,44 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const labels = useLabelsStore();
 
 const newName = ref('');
-const newColor = ref('#2563eb');
-const errorMsg = ref<string | null>(null);
+const newColor = ref<string>(LABEL_PALETTE[0].hex);
+const newSensitive = ref(false);
+/** The label whose color swatches are open. */
+const recoloring = ref<string | null>(null);
 
-async function add() {
-  errorMsg.value = null;
-  const name = newName.value.trim();
-  if (!name) return;
+async function run(action: () => Promise<unknown>) {
   try {
-    await labels.add(name, newColor.value);
-    newName.value = '';
-  } catch (e: unknown) {
-    errorMsg.value = e instanceof Error ? e.message : 'Failed to add label.';
+    await action();
+  } catch (e) {
+    pushError(e);
   }
 }
 
-async function rename(id: string, current: string) {
-  const next = window.prompt('Rename label', current);
-  if (!next || next.trim() === current) return;
-  await labels.update(id, { name: next.trim() });
+function add() {
+  const name = newName.value.trim();
+  if (!name) return;
+  run(async () => {
+    await labels.add(name, newColor.value, newSensitive.value);
+    newName.value = '';
+    newSensitive.value = false;
+  });
 }
 
-async function recolor(id: string, current: string) {
-  const next = window.prompt('Color (hex like #ff0000)', current);
-  if (!next) return;
-  await labels.update(id, { color: next.trim() });
+function rename(l: Label, e: Event) {
+  const input = e.target as HTMLInputElement;
+  const name = input.value.trim();
+  if (!name) input.value = l.name;
+  else if (name !== l.name) run(() => labels.update(l.id, { name }));
 }
 
-async function remove(id: string, name: string) {
-  if (
-    !window.confirm(
-      `Delete label "${name}"? This will remove it from any households tagged with it.`,
-    )
-  )
-    return;
-  await labels.remove(id);
+function recolor(l: Label, color: string) {
+  recoloring.value = null;
+  if (color !== l.color) run(() => labels.update(l.id, { color }));
+}
+
+function remove(l: Label) {
+  if (!window.confirm(`Delete "${l.name}"? It comes off every household that has it.`)) return;
+  run(() => labels.remove(l.id));
 }
 </script>
 
@@ -59,29 +64,54 @@ async function remove(id: string, name: string) {
           <button class="rounded p-1 hover:bg-stone-100" @click="emit('close')">×</button>
         </header>
 
-        <ul class="max-h-64 space-y-1 overflow-y-auto">
+        <ul class="max-h-80 space-y-1 overflow-y-auto">
           <li
             v-for="l in labels.items"
             :key="l.id"
-            class="flex items-center gap-2 rounded border border-stone-200 px-2 py-1"
+            class="rounded border border-stone-200 px-2 py-1.5"
           >
-            <span
-              class="h-4 w-4 shrink-0 rounded-full border border-stone-300"
-              :style="{ backgroundColor: l.color }"
-            />
-            <span class="flex-1 text-sm">{{ l.name }}</span>
-            <button class="rounded p-1 text-xs hover:bg-stone-100" @click="rename(l.id, l.name)">
-              Rename
-            </button>
-            <button class="rounded p-1 text-xs hover:bg-stone-100" @click="recolor(l.id, l.color)">
-              Color
-            </button>
-            <button
-              class="rounded p-1 text-xs text-danger-600 hover:bg-danger-100"
-              @click="remove(l.id, l.name)"
-            >
-              Delete
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="h-5 w-5 shrink-0 rounded-full ring-1 ring-stone-300"
+                :style="{ backgroundColor: l.color }"
+                :aria-label="`Change ${l.name} color`"
+                @click="recoloring = recoloring === l.id ? null : l.id"
+              />
+              <input
+                :value="l.name"
+                class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-stone-200 focus:border-stone-400 focus:outline-none"
+                :aria-label="`${l.name} name`"
+                @change="rename(l, $event)"
+                @keydown.enter="($event.target as HTMLInputElement).blur()"
+              />
+              <label class="flex items-center gap-1 text-xs text-stone-600">
+                <input
+                  type="checkbox"
+                  :checked="l.sensitive"
+                  @change="run(() => labels.update(l.id, { sensitive: ($event.target as HTMLInputElement).checked }))"
+                />
+                Sensitive
+              </label>
+              <button
+                class="rounded p-1 text-xs text-danger-600 hover:bg-danger-100"
+                @click="remove(l)"
+              >
+                Delete
+              </button>
+            </div>
+            <div v-if="recoloring === l.id" class="mt-1.5 flex gap-1.5 pl-7">
+              <button
+                v-for="c in LABEL_PALETTE"
+                :key="c.hex"
+                type="button"
+                class="h-5 w-5 rounded-full"
+                :class="c.hex === l.color ? 'ring-2 ring-stone-900 ring-offset-1' : ''"
+                :style="{ backgroundColor: c.hex }"
+                :aria-label="c.name"
+                @click="recolor(l, c.hex)"
+              />
+            </div>
           </li>
           <li
             v-if="!labels.items.length"
@@ -97,17 +127,27 @@ async function remove(id: string, name: string) {
             <input
               v-model="newName"
               required
-              placeholder="Name (e.g. Widow)"
-              class="flex-1 rounded border border-stone-300 px-2 py-1 text-sm"
-            />
-            <input
-              v-model="newColor"
-              type="color"
-              class="h-8 w-12 rounded border border-stone-300"
+              placeholder="Name"
+              class="min-w-0 flex-1 rounded border border-stone-300 px-2 py-1 text-sm"
             />
             <button class="rounded bg-stone-900 px-3 py-1 text-sm text-white">Add</button>
           </div>
-          <p v-if="errorMsg" class="text-xs text-danger-600">{{ errorMsg }}</p>
+          <div class="flex items-center gap-1.5">
+            <button
+              v-for="c in LABEL_PALETTE"
+              :key="c.hex"
+              type="button"
+              class="h-5 w-5 rounded-full"
+              :class="c.hex === newColor ? 'ring-2 ring-stone-900 ring-offset-1' : ''"
+              :style="{ backgroundColor: c.hex }"
+              :aria-label="c.name"
+              @click="newColor = c.hex"
+            />
+            <label class="ml-auto flex items-center gap-1 text-xs text-stone-600">
+              <input v-model="newSensitive" type="checkbox" />
+              Sensitive
+            </label>
+          </div>
         </form>
       </div>
     </div>

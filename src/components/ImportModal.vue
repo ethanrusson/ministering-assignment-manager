@@ -21,6 +21,7 @@ import { useHouseholdsStore } from '@/stores/households';
 import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useAuthStore } from '@/stores/auth';
+import { useLcrImportsStore } from '@/stores/lcrImports';
 
 defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -30,6 +31,7 @@ const elders = useEldersStore();
 const households = useHouseholdsStore();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
+const lcrImports = useLcrImportsStore();
 
 const html = ref('');
 const parsed = ref<ParseResult | null>(null);
@@ -133,6 +135,8 @@ async function apply() {
   applyLog.value = [];
   errorMsg.value = null;
   try {
+    // Marks this run first, so everything it creates counts as "new since last import".
+    await lcrImports.record();
     // 1) People. The plan already filtered these down to the chosen mode.
     // Identity first, so everything below can match people by LCR ID.
     for (const u of p.elderIdentityUpdates) await elders.update(u.id, u.patch);

@@ -9,6 +9,9 @@ import { useCompanionshipsStore } from '@/stores/companionships';
 import { useStreetsStore } from '@/stores/streets';
 import { useHomesStore } from '@/stores/homes';
 import { useLocationReviewsStore } from '@/stores/locationReviews';
+import { useFlagAcknowledgementsStore } from '@/stores/flagAcknowledgements';
+import { useLcrImportsStore } from '@/stores/lcrImports';
+import { useSensitive } from '@/lib/useSensitive';
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue';
 import LabelsModal from '@/components/LabelsModal.vue';
 import ImportModal from '@/components/ImportModal.vue';
@@ -49,6 +52,8 @@ import {
   MapPinIcon,
   MapIcon,
   HomeModernIcon,
+  EyeIcon,
+  EyeSlashIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -68,6 +73,9 @@ const companionships = useCompanionshipsStore();
 const streets = useStreetsStore();
 const homes = useHomesStore();
 const locationReviews = useLocationReviewsStore();
+const flagAcks = useFlagAcknowledgementsStore();
+const lcrImports = useLcrImportsStore();
+const sensitive = useSensitive();
 
 const snap = useSnapshot();
 const { count: changeCount } = useChangeList();
@@ -83,6 +91,8 @@ useConnectionWatcher([
   () => streets.fetch(),
   () => homes.fetch(),
   () => locationReviews.fetch(),
+  () => flagAcks.fetch(),
+  () => lcrImports.fetch(),
   () => (auth.wardId ? snap.loadSnapshot(auth.wardId) : Promise.resolve()),
 ]);
 
@@ -158,6 +168,7 @@ async function onBackupFileChosen(e: Event) {
       streets.fetch(),
       homes.fetch(),
       locationReviews.fetch(),
+      flagAcks.fetch(),
       snap.loadSnapshot(auth.wardId),
     ]);
   } catch (e) {
@@ -346,6 +357,9 @@ const settingsMenuItems = computed<MenuItem[]>(() => {
     theme.isDark.value
       ? { label: 'Light mode', icon: SunIcon, onClick: theme.toggle }
       : { label: 'Dark mode', icon: MoonIcon, onClick: theme.toggle },
+    sensitive.show.value
+      ? { label: 'Hide sensitive', icon: EyeSlashIcon, onClick: sensitive.toggle }
+      : { label: 'Show sensitive', icon: EyeIcon, onClick: sensitive.toggle },
   ];
   if (snap.hasSnapshot.value) {
     items.push({ label: 'Update snapshot', icon: CameraIcon, onClick: saveCurrentSnapshot });
@@ -372,6 +386,8 @@ onMounted(async () => {
       streets.fetch(),
       homes.fetch(),
       locationReviews.fetch(),
+      flagAcks.fetch(),
+      lcrImports.fetch(),
     ]);
     // Load the ward's shared baseline snapshot (if one has been saved).
     if (auth.wardId) await snap.loadSnapshot(auth.wardId);

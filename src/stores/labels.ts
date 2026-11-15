@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
 import { subscribeToTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
+import { useSensitive } from '@/lib/useSensitive';
 
 export type Label = Database['public']['Tables']['labels']['Row'];
 
@@ -13,6 +14,10 @@ export const useLabelsStore = defineStore('labels', () => {
   const loaded = ref(false);
   let channel: RealtimeChannel | null = null;
   const byId = computed(() => new Map(items.value.map((l) => [l.id, l])));
+  const sensitive = useSensitive();
+  /** Labels that may be shown right now: sensitive ones only with "Show sensitive" on. */
+  const shown = computed(() => items.value.filter((l) => sensitive.show.value || !l.sensitive));
+  const shownIds = computed(() => new Set(shown.value.map((l) => l.id)));
 
   async function fetch() {
     const { data, error } = await supabase.from('labels').select('*').order('name');
@@ -31,12 +36,12 @@ export const useLabelsStore = defineStore('labels', () => {
 
   onScopeDispose(() => { channel?.unsubscribe(); });
 
-  async function add(name: string, color: string) {
+  async function add(name: string, color: string, sensitiveLabel = false) {
     const auth = useAuthStore();
     if (!auth.wardId) throw new Error('No ward.');
     const { data, error } = await supabase
       .from('labels')
-      .insert({ ward_id: auth.wardId, name, color })
+      .insert({ ward_id: auth.wardId, name, color, sensitive: sensitiveLabel })
       .select()
       .single();
     if (error) throw error;
@@ -45,7 +50,7 @@ export const useLabelsStore = defineStore('labels', () => {
     return data;
   }
 
-  async function update(id: string, patch: Partial<Pick<Label, 'name' | 'color'>>) {
+  async function update(id: string, patch: Partial<Pick<Label, 'name' | 'color' | 'sensitive'>>) {
     const { data, error } = await supabase
       .from('labels')
       .update(patch)
@@ -68,5 +73,5 @@ export const useLabelsStore = defineStore('labels', () => {
     items.value.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  return { items, byId, loaded, fetch, add, update, remove };
+  return { items, byId, shown, shownIds, loaded, fetch, add, update, remove };
 });

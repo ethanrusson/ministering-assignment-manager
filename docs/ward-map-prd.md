@@ -227,13 +227,13 @@ Label-related changes are defined in Phase 3, after its checkpoint.
 | No location | Household | no `lat`/`lng` | Via `location_reviews` |
 | Outside ward | Household | point outside `wards.boundary` (needs Phase 6) | Via `location_reviews` |
 | Location changed | Household | open `moved` review | Via `location_reviews` |
-| New since last import | Household / Elder | created by the most recent import | Expires at the next import |
+| New since last import | Household / Elder | has an LCR ID and was created at or after the most recent `lcr_imports` row | Expires at the next import |
 | Elder without companionship | Elder | not in `companionship_elders` and not `not_generally_assigned` | No |
 | Not generally assigned | Elder | from LCR | No |
 | Over capacity | Companionship | households > `HOUSEHOLD_LIMIT` (5) | No |
 | Existing validation rules | Companionship | `validation.ts`: singleton, multi-minor, no-district, etc. | No |
 
-Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowledgeable flags need an acknowledgement record (table defined at the checkpoint).
+Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowledgeable flags need an acknowledgement record (`flag_acknowledgements`, below).
 
 ### Labels — current state
 
@@ -260,7 +260,21 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
 7. Is a free-text note per household wanted here, or kept out of scope?
 8. Label colors: confirm the fixed palette. It must stay distinct from district colors and status colors in both themes.
 
-Data changes for labels are written into this document after the checkpoint.
+**Answers (Checkpoint 3)**
+1. Start with two labels: Widow (exists) and Less active. More are added in Manage Labels as needed.
+2. No labels on elders for now.
+3. No automatic or expiring labels.
+4. Yes: a label can be marked sensitive. Sensitive labels, and household notes, are hidden unless "Show sensitive" is on. It's a per-device setting, off by default, in the settings menu, and applies to the map and the board.
+5. Alphabetical; no user-set order.
+6. "Far from ministers" can be acknowledged, and "Ministered from another district" once Phase 6 adds it, with an optional note. An acknowledgement holds while the household keeps the same companionship. Every other flag clears only when its data changes.
+7. Yes: one free-text note per household, shown and edited in the map popover, treated as sensitive.
+8. A fixed palette of 8 label colors, kept distinct from the 8 district colors and the red used for warnings: pink, fuchsia, sky, emerald, indigo, yellow, stone and brown. Existing labels move to the nearest palette color.
+
+**Data changes (migration 0007)**
+- `labels.sensitive boolean not null default false`
+- `households.note text`
+- `lcr_imports`: `id, ward_id, created_at`, one row per ministering import (drives "New since last import")
+- `flag_acknowledgements`: `id, ward_id, household_id, flag text check in ('far_from_ministers','other_district'), companionship_id, note text, created_by, created_at`; unique per household and flag; deleted with its household or companionship
 
 **Acceptance (after the checkpoint)**
 - Labels can be created, recolored, applied and removed without browser prompts, on both map and board.

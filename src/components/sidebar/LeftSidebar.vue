@@ -9,6 +9,8 @@ import { usePickPlace } from '@/lib/usePickPlace';
 import { useSidebar } from './useSidebar';
 import AgeBadge from '@/components/AgeBadge.vue';
 import LabelChip from '@/components/LabelChip.vue';
+import LabelPicker from '@/components/LabelPicker.vue';
+import { labelChipStyle } from '@/lib/labelColors';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -134,31 +136,8 @@ async function toggleHouseholdHidden(id: string, hidden: boolean) {
   await households.update(id, { hidden: !hidden });
 }
 
-async function editLabels(id: string) {
-  if (!labels.items.length) {
-    window.alert('No labels yet. Open "Manage Labels" to create some.');
-    return;
-  }
-  const current = households.labelsForHousehold.get(id) ?? [];
-  const list = labels.items
-    .map((l, i) => `${i + 1}. ${current.includes(l.id) ? '[x]' : '[ ]'} ${l.name}`)
-    .join('\n');
-  const input = window.prompt(
-    `Toggle labels for "${households.byId.get(id)?.name ?? ''}". Comma-separated numbers (e.g. "1,3"):\n\n${list}`,
-    current.length
-      ? labels.items
-          .map((l, i) => (current.includes(l.id) ? `${i + 1}` : null))
-          .filter(Boolean)
-          .join(',')
-      : '',
-  );
-  if (input === null) return;
-  const indices = input
-    .split(',')
-    .map((s) => Number(s.trim()) - 1)
-    .filter((n) => Number.isInteger(n) && n >= 0 && n < labels.items.length);
-  await households.setLabels(id, indices.map((i) => labels.items[i].id));
-}
+/** The household row whose label picker is open. */
+const labelPickerFor = ref<string | null>(null);
 
 async function removeHousehold(id: string, name: string) {
   if (!window.confirm(`Delete household "${name}"? This cannot be undone.`)) return;
@@ -360,15 +339,13 @@ const householdsHovered = computed(
             placeholder="Search households…"
             class="w-full rounded border border-stone-300 px-2 py-1 text-sm"
           />
-          <div v-if="labels.items.length" class="flex flex-wrap gap-1">
+          <div v-if="labels.shown.length" class="flex flex-wrap gap-1">
             <button
-              v-for="l in labels.items"
+              v-for="l in labels.shown"
               :key="l.id"
               class="rounded-full border px-2 py-0.5 text-[10px]"
-              :class="
-                filterLabelIds.has(l.id) ? 'border-stone-700 bg-stone-100' : 'border-stone-200'
-              "
-              :style="{ color: l.color }"
+              :class="filterLabelIds.has(l.id) ? 'font-semibold' : ''"
+              :style="labelChipStyle(l.color, filterLabelIds.has(l.id))"
               @click="toggleLabelFilter(l.id)"
             >
               {{ l.name }}
@@ -419,7 +396,7 @@ const householdsHovered = computed(
                   class="flex h-5 w-5 items-center justify-center rounded text-stone-500 hover:bg-stone-100"
                   title="Edit labels"
                   @pointerdown.stop
-                  @click="editLabels(h.id)"
+                  @click="labelPickerFor = labelPickerFor === h.id ? null : h.id"
                 >
                   <TagIcon class="h-3.5 w-3.5" />
                 </button>
@@ -444,12 +421,13 @@ const householdsHovered = computed(
                 </button>
               </div>
             </div>
+            <LabelPicker v-if="labelPickerFor === h.id" :household-id="h.id" />
             <div
-              v-if="(households.labelsForHousehold.get(h.id) ?? []).length"
+              v-else-if="households.shownLabelsFor(h.id).length"
               class="flex flex-wrap gap-1"
             >
               <LabelChip
-                v-for="lid in households.labelsForHousehold.get(h.id) ?? []"
+                v-for="lid in households.shownLabelsFor(h.id)"
                 :key="lid"
                 :name="labels.byId.get(lid)?.name ?? '?'"
                 :color="labels.byId.get(lid)?.color ?? '#888'"

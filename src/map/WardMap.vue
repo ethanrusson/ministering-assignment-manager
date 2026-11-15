@@ -43,6 +43,21 @@ import { placeStreetLabels } from './streets';
 import { fitLabels, LABEL_OFFSET } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
 import LocationsPanel from './LocationsPanel.vue';
+import FiltersPanel from './FiltersPanel.vue';
+import LabelPicker from '@/components/LabelPicker.vue';
+import LabelChip from '@/components/LabelChip.vue';
+import { useFlags } from '@/lib/useFlags';
+import { useSensitive } from '@/lib/useSensitive';
+import { useFlagAcknowledgementsStore } from '@/stores/flagAcknowledgements';
+import {
+  emptyFilters,
+  isFiltering,
+  matches,
+  STATUS_PAINT,
+  statusOf,
+  type ColorBy,
+  type MapFilters,
+} from './mapFilters';
 import { useLocationReviewsStore } from '@/stores/locationReviews';
 import type { MovedData } from '@/lib/lcr/reviews';
 
@@ -63,6 +78,9 @@ const companionships = useCompanionshipsStore();
 const streets = useStreetsStore();
 const homes = useHomesStore();
 const reviews = useLocationReviewsStore();
+const acks = useFlagAcknowledgementsStore();
+const flags = useFlags();
+const sensitive = useSensitive();
 
 const root = ref<HTMLDivElement | null>(null);
 const size = ref({ w: 0, h: 0 });
@@ -105,6 +123,42 @@ function districtRankOf(householdId: string): number {
   return districtId ? districts.items.findIndex((d) => d.id === districtId) : -1;
 }
 
+// ─── Coloring and filters (Phase 3) ────────────────────────────────────────
+
+const colorBy = ref<ColorBy>('district');
+const filters = ref<MapFilters>(emptyFilters());
+const filtersOpen = ref(false);
+
+/** Household ids passing the filters, or null when nothing is filtered. */
+const matched = computed(() => {
+  if (!isFiltering(filters.value)) return null;
+  const f = flags.value.households;
+  return new Set(
+    households.visible
+      .filter((h) =>
+        matches(filters.value, {
+          labelIds: households.shownLabelsFor(h.id),
+          flags: f.get(h.id) ?? [],
+          districtRank: districtRankOf(h.id),
+        }),
+      )
+      .map((h) => h.id),
+  );
+});
+
+function paintFor(householdId: string): Mark['paint'] {
+  if (colorBy.value === 'district') return undefined;
+  if (colorBy.value === 'status') {
+    const p = STATUS_PAINT[statusOf(flags.value.households.get(householdId) ?? [])];
+    return { fill: v(p.fill), border: v(p.border) };
+  }
+  const label = labels.byId.get(colorBy.value);
+  if (!label) return undefined;
+  return households.shownLabelsFor(householdId).includes(label.id)
+    ? { fill: `${label.color}66`, border: label.color }
+    : { fill: v('white'), border: v('stone-300') };
+}
+
 function markFor(householdId: string): Mark {
   const residents = eldersLivingIn(householdId, model.value);
   const free = residents.some((e) => !companionships.companionshipForElder.has(e));
@@ -112,9 +166,11 @@ function markFor(householdId: string): Mark {
     family: districtFamily(districtRankOf(householdId)),
     hasCompanionship: companionships.companionshipForHousehold.has(householdId),
     elder: free ? 'free' : residents.length ? 'minister' : null,
-    labelColors: (households.labelsForHousehold.get(householdId) ?? [])
+    labelColors: households
+      .shownLabelsFor(householdId)
       .map((id) => labels.byId.get(id)?.color)
       .filter((c): c is string => !!c),
+    paint: paintFor(householdId),
   };
 }
 
@@ -185,7 +241,8 @@ const showAll = ref(false);
 const conn = computed(() =>
   selectedId.value ? buildConnections(selectedId.value, model.value) : null,
 );
-const faded = (id: string) => !!conn.value && !conn.value.focus.has(id);
+const faded = (id: string) =>
+  (!!conn.value && !conn.value.focus.has(id)) || (!!matched.value && !matched.value.has(id));
 
 /** Each group's label, if it fits: the selected household first, then its connections. */
 const labelsShown = computed(() => {
@@ -309,16 +366,25 @@ const popover = computed(() => {
   const screenX = at.x + vp.tx;
   const screenY = at.y + vp.ty;
   const gap = 20;
-  const left = screenX + gap + POPOVER_W > size.value.w;
+  const left = screenX + gap + POPOVER_W > visibleWidth.value;
   const above = screenY > size.value.h * 0.55;
 
   return {
     name: h.name,
     district: rank < 0 ? null : `${districtLabel(rank)} · ${districts.items[rank].name}`,
     family,
-    labels: (households.labelsForHousehold.get(id) ?? [])
+    labels: households
+      .shownLabelsFor(id)
       .map((lid) => labels.byId.get(lid))
       .filter((l) => !!l),
+    flags: flags.value.households.get(id) ?? [],
+    companionshipId: compId ?? null,
+    farAck: compId
+      ? (acks.items.find(
+          (a) => a.household_id === id && a.flag === 'far_from_ministers' && a.companionship_id === compId,
+        ) ?? null)
+      : null,
+    note: h.note ?? '',
     ministeredBy: joinNames(ministers.map(elderName)),
     ministeredDetail: [
       rank < 0 ? null : districtLabel(rank),
@@ -340,6 +406,36 @@ const popover = computed(() => {
 
 function select(id: string) {
   selectedId.value = id;
+  editingLabels.value = false;
+  acknowledging.value = false;
+}
+
+const editingLabels = ref(false);
+/** The "far from ministers" acknowledgement form is open, with its optional note. */
+const acknowledging = ref(false);
+const ackNote = ref('');
+
+async function acknowledgeFar() {
+  const p = popover.value;
+  if (!p?.companionshipId || !selectedId.value) return;
+  try {
+    await acks.acknowledge(selectedId.value, 'far_from_ministers', p.companionshipId, ackNote.value.trim() || null);
+    acknowledging.value = false;
+    ackNote.value = '';
+  } catch (err) {
+    pushError(err);
+  }
+}
+
+async function saveNote(e: Event) {
+  const id = selectedId.value;
+  const note = (e.target as HTMLTextAreaElement).value.trim() || null;
+  if (!id || note === (households.byId.get(id)?.note ?? null)) return;
+  try {
+    await households.setNote(id, note);
+  } catch (err) {
+    pushError(err);
+  }
 }
 
 // ─── Viewport ──────────────────────────────────────────────────────────────
@@ -508,12 +604,17 @@ function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) 
   else select(next);
 }
 
-/** Center a household and select it (search results). */
+/** Screen width not covered by an open side panel (w-72 / w-80 plus its margin). */
+const visibleWidth = computed(
+  () => size.value.w - (filtersOpen.value ? 336 : locationsOpen.value ? 304 : 0),
+);
+
+/** Center a household and select it (search results, gaps, moved items). */
 function focusHousehold(id: string) {
   const g = groupOf.value.get(id);
   if (!g) return;
   if (vp.scale < 1) vp.scale = 1;
-  vp.tx = size.value.w / 2 - g.p.x * vp.scale;
+  vp.tx = visibleWidth.value / 2 - g.p.x * vp.scale;
   vp.ty = size.value.h / 2 - g.p.y * vp.scale;
   select(id);
 }
@@ -591,7 +692,12 @@ function onClickCapture(e: MouseEvent) {
 }
 
 function onBackgroundClick(e: MouseEvent) {
-  if ((e.target as HTMLElement).closest('[data-household], [data-no-pan]')) return;
+  // The event's path, not target.closest(): a click that swaps its own button
+  // out (Acknowledge → form) has a detached target by the time it bubbles here.
+  const inside = e
+    .composedPath()
+    .some((el) => el instanceof HTMLElement && (el.hasAttribute('data-household') || el.hasAttribute('data-no-pan')));
+  if (inside) return;
   if (placing.value?.kind === 'household') void placeHouseholdAt(e);
   else if (placing.value) return;
   else if (editingHomes.value) void editHomeAt(e);
@@ -792,14 +898,7 @@ onBeforeUnmount(() => {
               >
                 {{ popover.district }}
               </span>
-              <span
-                v-for="l in popover.labels"
-                :key="l!.id"
-                class="rounded-full px-2 py-px text-[11px] font-medium"
-                :style="{ backgroundColor: l!.color + '22', color: l!.color }"
-              >
-                {{ l!.name }}
-              </span>
+              <LabelChip v-for="l in popover.labels" :key="l!.id" :name="l!.name" :color="l!.color" />
             </div>
           </div>
           <button
@@ -829,19 +928,83 @@ onBeforeUnmount(() => {
         </div>
 
         <div
-          v-if="!popover.hasCompanionship"
+          v-if="popover.flags.includes('no_companionship')"
           class="rounded-md bg-red-100 px-2 py-1.5 text-xs text-red-800"
         >
           No companionship assigned.
         </div>
-
-        <button
-          type="button"
-          class="self-start text-xs text-blue-700 hover:underline"
-          @click="startPlacing('household', selectedId!)"
+        <div
+          v-if="popover.flags.includes('far_from_ministers')"
+          class="space-y-1.5 rounded-md bg-amber-100 px-2 py-1.5 text-xs text-amber-800"
         >
-          Adjust location
-        </button>
+          <div class="flex items-center gap-2">
+            <span class="flex-1">More than 0.5 mi from their ministers.</span>
+            <button
+              v-if="!acknowledging"
+              type="button"
+              class="font-semibold underline"
+              @click="acknowledging = true"
+            >
+              Acknowledge
+            </button>
+          </div>
+          <form v-if="acknowledging" class="flex gap-1" @submit.prevent="acknowledgeFar">
+            <input
+              v-model="ackNote"
+              placeholder="Note (optional)"
+              class="min-w-0 flex-1 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-stone-900"
+            />
+            <button type="submit" class="rounded bg-amber-600 px-2 text-white">OK</button>
+          </form>
+        </div>
+        <div
+          v-else-if="popover.farAck"
+          class="flex items-center gap-2 rounded-md bg-stone-100 px-2 py-1.5 text-xs text-stone-600"
+        >
+          <span class="flex-1">
+            Far from ministers, acknowledged{{ popover.farAck.note ? `: ${popover.farAck.note}` : '.' }}
+          </span>
+          <button type="button" class="underline" @click="acks.remove(popover.farAck.id).catch(pushError)">
+            Undo
+          </button>
+        </div>
+        <div
+          v-if="popover.flags.includes('location_changed')"
+          class="rounded-md bg-cyan-100 px-2 py-1.5 text-xs text-cyan-800"
+        >
+          Location changed at the last import (see Locations).
+        </div>
+        <div
+          v-if="popover.flags.includes('new_since_import')"
+          class="rounded-md bg-stone-100 px-2 py-1.5 text-xs text-stone-600"
+        >
+          New since the last import.
+        </div>
+
+        <LabelPicker v-if="editingLabels" :household-id="selectedId!" />
+
+        <textarea
+          v-if="sensitive.show.value"
+          :key="selectedId!"
+          :value="popover.note"
+          rows="2"
+          placeholder="Note"
+          class="w-full resize-y rounded border border-stone-200 bg-transparent px-2 py-1 text-xs focus:border-stone-400 focus:outline-none"
+          @blur="saveNote"
+        />
+
+        <div class="flex gap-3 text-xs">
+          <button type="button" class="text-blue-700 hover:underline" @click="editingLabels = !editingLabels">
+            {{ editingLabels ? 'Done' : 'Labels' }}
+          </button>
+          <button
+            type="button"
+            class="text-blue-700 hover:underline"
+            @click="startPlacing('household', selectedId!)"
+          >
+            Adjust location
+          </button>
+        </div>
       </div>
     </div>
 
@@ -872,6 +1035,16 @@ onBeforeUnmount(() => {
       </span>
       <button type="button" class="font-semibold underline" @click="placing = null">Cancel</button>
     </div>
+
+    <FiltersPanel
+      v-if="filtersOpen"
+      v-model:filters="filters"
+      v-model:color-by="colorBy"
+      :flags="flags"
+      :match-count="matched ? matched.size : null"
+      @close="filtersOpen = false"
+      @focus-household="focusHousehold"
+    />
 
     <LocationsPanel
       v-if="locationsOpen"
@@ -941,9 +1114,21 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="relative h-10 rounded-full px-3 text-xs transition-colors"
+        :class="filtersOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
+        :aria-pressed="filtersOpen"
+        @click="(filtersOpen = !filtersOpen) && (locationsOpen = false)"
+      >
+        Filters
+        <span
+          v-if="matched || colorBy !== 'district'"
+          class="absolute right-1 top-1.5 h-2 w-2 rounded-full bg-blue-600"
+        />
+      </button>
+      <button
+        class="relative h-10 rounded-full px-3 text-xs transition-colors"
         :class="locationsOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
         :aria-pressed="locationsOpen"
-        @click="locationsOpen = !locationsOpen"
+        @click="(locationsOpen = !locationsOpen) && (filtersOpen = false)"
       >
         Locations
         <span

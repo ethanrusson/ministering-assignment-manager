@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
 import { subscribeToTable, subscribeToJoinTable } from '@/lib/realtime';
 import type { Database } from '@/types/database';
+import { useLabelsStore } from '@/stores/labels';
 
 export type Household = Database['public']['Tables']['households']['Row'];
 
@@ -31,6 +32,12 @@ export const useHouseholdsStore = defineStore('households', () => {
     }
     return map;
   });
+
+  /** A household's labels that may be shown right now (see useSensitive). */
+  function shownLabelsFor(id: string): string[] {
+    const shown = useLabelsStore().shownIds;
+    return (labelsForHousehold.value.get(id) ?? []).filter((l) => shown.has(l));
+  }
 
   async function fetch() {
     const [{ data: hh, error: e1 }, { data: hl, error: e2 }] = await Promise.all([
@@ -139,6 +146,17 @@ export const useHouseholdsStore = defineStore('households', () => {
     items.value = items.value.map((h) => (h.id === id ? data : h));
   }
 
+  async function setNote(id: string, note: string | null) {
+    const { data, error } = await supabase
+      .from('households')
+      .update({ note })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    items.value = items.value.map((h) => (h.id === id ? data : h));
+  }
+
   async function remove(id: string) {
     const { error } = await supabase.from('households').delete().eq('id', id);
     if (error) throw error;
@@ -187,12 +205,14 @@ export const useHouseholdsStore = defineStore('households', () => {
     visible,
     byId,
     labelsForHousehold,
+    shownLabelsFor,
     loaded,
     fetch,
     add,
     update,
     setLocations,
     setManualLocation,
+    setNote,
     remove,
     setLabels,
   };

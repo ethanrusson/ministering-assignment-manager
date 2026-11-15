@@ -26,6 +26,7 @@ export type LocationReviewStatus = 'open' | 'resolved' | 'dismissed';
 export type StreetKind = 'main' | 'residential' | 'lane';
 export type StreetSource = 'osm' | 'manual';
 export type HomeSource = 'footprint' | 'manual';
+export type AcknowledgeableFlag = 'far_from_ministers' | 'other_district';
 
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '12' };
@@ -137,6 +138,7 @@ export type Database = {
           location_updated_at: string | null;
           district_id: string | null;
           location_group_id: string | null;
+          note: string | null;
           created_at: string;
         };
         Insert: {
@@ -151,6 +153,7 @@ export type Database = {
           location_updated_at?: string | null;
           district_id?: string | null;
           location_group_id?: string | null;
+          note?: string | null;
           created_at?: string;
         };
         Update: {
@@ -165,17 +168,26 @@ export type Database = {
           location_updated_at?: string | null;
           district_id?: string | null;
           location_group_id?: string | null;
+          note?: string | null;
           created_at?: string;
         };
         Relationships: EmptyRel;
       };
       labels: {
-        Row: { id: string; ward_id: string; name: string; color: string; created_at: string };
+        Row: {
+          id: string;
+          ward_id: string;
+          name: string;
+          color: string;
+          sensitive: boolean;
+          created_at: string;
+        };
         Insert: {
           id?: string;
           ward_id: string;
           name: string;
           color: string;
+          sensitive?: boolean;
           created_at?: string;
         };
         Update: {
@@ -183,6 +195,7 @@ export type Database = {
           ward_id?: string;
           name?: string;
           color?: string;
+          sensitive?: boolean;
           created_at?: string;
         };
         Relationships: EmptyRel;
@@ -352,6 +365,45 @@ export type Database = {
           created_at?: string;
           resolved_at?: string | null;
           resolved_by?: string | null;
+        };
+        Relationships: EmptyRel;
+      };
+      lcr_imports: {
+        Row: { id: string; ward_id: string; created_at: string };
+        Insert: { id?: string; ward_id: string; created_at?: string };
+        Update: { id?: string; ward_id?: string; created_at?: string };
+        Relationships: EmptyRel;
+      };
+      flag_acknowledgements: {
+        Row: {
+          id: string;
+          ward_id: string;
+          household_id: string;
+          flag: AcknowledgeableFlag;
+          companionship_id: string;
+          note: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ward_id: string;
+          household_id: string;
+          flag: AcknowledgeableFlag;
+          companionship_id: string;
+          note?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ward_id?: string;
+          household_id?: string;
+          flag?: AcknowledgeableFlag;
+          companionship_id?: string;
+          note?: string | null;
+          created_by?: string | null;
+          created_at?: string;
         };
         Relationships: EmptyRel;
       };

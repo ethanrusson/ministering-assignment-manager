@@ -654,7 +654,7 @@ const startMove = makeStart(dragOriginPos, {
           <span class="flex-1 truncate" :class="householdClass(h.id)">{{ h.name }}</span>
           <span class="flex shrink-0 gap-1">
             <LabelChip
-              v-for="lid in households.labelsForHousehold.get(h.id) ?? []"
+              v-for="lid in households.shownLabelsFor(h.id)"
               :key="lid"
               :name="labels.byId.get(lid)?.name ?? '?'"
               :color="labels.byId.get(lid)?.color ?? '#888'"

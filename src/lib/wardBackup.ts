@@ -12,18 +12,20 @@
 //   household_labels                 (FK -> households, labels)
 //   location_reviews                 (FK -> households)
 //   streets, homes                   (no FK to other ward data)
+//   flag_acknowledgements            (FK -> households, companionships)
 //
 // Delete order is the reverse. Rows keep their original ids so positions and
 // joins survive the round-trip; only ward_id is rewritten to the current ward.
 //
-// Version 1 files predate the map tables, and version 2 files predate homes;
-// they restore with those tables empty.
+// Version 1 files predate the map tables, version 2 files predate homes, and
+// version 3 files predate flag acknowledgements; they restore with those
+// tables empty.
 
 import { supabase } from './supabase';
 import type { Database, Json } from '@/types/database';
 
-export const BACKUP_VERSION = 3;
-const SUPPORTED_VERSIONS = [1, 2, 3];
+export const BACKUP_VERSION = 4;
+const SUPPORTED_VERSIONS = [1, 2, 3, 4];
 
 interface ElderRow {
   id: string;
@@ -54,6 +56,7 @@ type LocationGroupRow = Database['public']['Tables']['location_groups']['Row'];
 type LocationReviewRow = Database['public']['Tables']['location_reviews']['Row'];
 type StreetRow = Database['public']['Tables']['streets']['Row'];
 type HomeRow = Database['public']['Tables']['homes']['Row'];
+type FlagAckRow = Database['public']['Tables']['flag_acknowledgements']['Row'];
 interface LabelRow {
   id: string;
   ward_id: string;
@@ -110,6 +113,8 @@ export interface WardBackup {
   streets?: StreetRow[];
   /** Added in version 3. */
   homes?: HomeRow[];
+  /** Added in version 4. */
+  flag_acknowledgements?: FlagAckRow[];
 }
 
 export async function exportWardBackup(wardId: string): Promise<WardBackup> {
@@ -127,6 +132,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     reviewsRes,
     streetsRes,
     homesRes,
+    acksRes,
   ] = await Promise.all([
     supabase.from('wards').select('name, boundary').eq('id', wardId).maybeSingle(),
     supabase.from('elders').select('*').eq('ward_id', wardId),
@@ -141,6 +147,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     supabase.from('location_reviews').select('*').eq('ward_id', wardId),
     supabase.from('streets').select('*').eq('ward_id', wardId),
     supabase.from('homes').select('*').eq('ward_id', wardId),
+    supabase.from('flag_acknowledgements').select('*').eq('ward_id', wardId),
   ]);
 
   for (const r of [
@@ -157,6 +164,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     reviewsRes,
     streetsRes,
     homesRes,
+    acksRes,
   ]) {
     if (r.error) throw r.error;
   }
@@ -177,6 +185,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     location_reviews: reviewsRes.data ?? [],
     streets: streetsRes.data ?? [],
     homes: homesRes.data ?? [],
+    flag_acknowledgements: acksRes.data ?? [],
   };
 }
 
@@ -200,7 +209,13 @@ export function validateWardBackup(raw: unknown): WardBackup {
   arr(o.companionship_elders, 'companionship_elders');
   arr(o.companionship_households, 'companionship_households');
   arr(o.household_labels, 'household_labels');
-  for (const key of ['location_groups', 'location_reviews', 'streets', 'homes'] as const) {
+  for (const key of [
+    'location_groups',
+    'location_reviews',
+    'streets',
+    'homes',
+    'flag_acknowledgements',
+  ] as const) {
     if (o[key] !== undefined) arr(o[key], key);
   }
   return o as WardBackup;
@@ -242,6 +257,7 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   }
 
   for (const table of [
+    'flag_acknowledgements',
     'homes',
     'streets',
     'location_reviews',
@@ -330,6 +346,11 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   const streets = backup.streets ?? [];
   if (streets.length) {
     const { error } = await supabase.from('streets').insert(stamp(streets));
+    if (error) throw error;
+  }
+  const acks = backup.flag_acknowledgements ?? [];
+  if (acks.length) {
+    const { error } = await supabase.from('flag_acknowledgements').insert(stamp(acks));
     if (error) throw error;
   }
   const homes = backup.homes ?? [];

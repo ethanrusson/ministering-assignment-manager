@@ -106,6 +106,22 @@ export const useHouseholdsStore = defineStore('households', () => {
     sortItems();
   }
 
+  /** Writes LCR coordinates for many households in one request. */
+  async function setLocations(updates: { id: string; lat: number; lng: number }[]) {
+    if (!updates.length) return;
+    const now = new Date().toISOString();
+    const rows = updates.flatMap((u) => {
+      const h = byId.value.get(u.id);
+      return h
+        ? [{ ...h, lat: u.lat, lng: u.lng, location_source: 'lcr' as const, location_updated_at: now }]
+        : [];
+    });
+    const { data, error } = await supabase.from('households').upsert(rows).select();
+    if (error) throw error;
+    const fresh = new Map((data ?? []).map((h) => [h.id, h]));
+    items.value = items.value.map((h) => fresh.get(h.id) ?? h);
+  }
+
   async function remove(id: string) {
     const { error } = await supabase.from('households').delete().eq('id', id);
     if (error) throw error;
@@ -158,6 +174,7 @@ export const useHouseholdsStore = defineStore('households', () => {
     fetch,
     add,
     update,
+    setLocations,
     remove,
     setLabels,
   };

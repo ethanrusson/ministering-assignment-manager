@@ -1,17 +1,19 @@
-// Board layout — the free-form district canvas, or every card in a static
-// masonry grid — plus the grid's zoom. Remembered per-device, like useViewMode.
+// Board layout — the free-form district canvas, every card in a static
+// masonry grid, or the ward map — plus the grid's zoom. Remembered per-device,
+// like useViewMode.
 
 import { readonly, ref, watch } from 'vue';
 import { ZOOM_MAX, ZOOM_MIN } from './usePanZoom';
 
-export type BoardLayout = 'canvas' | 'grid';
+export type BoardLayout = 'canvas' | 'grid' | 'map';
 
 const STORAGE_KEY = 'boardLayout';
 const ZOOM_KEY = 'gridZoom';
 
 function initial(): BoardLayout {
   try {
-    if (localStorage.getItem(STORAGE_KEY) === 'grid') return 'grid';
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === 'grid' || saved === 'map') return saved;
   } catch {
     /* private browsing / storage disabled */
   }

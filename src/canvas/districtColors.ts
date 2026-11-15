@@ -17,7 +17,15 @@ const PALETTE = [
   'bg-orange-100 text-orange-700 ring-orange-300',
 ];
 
+/** The colour family behind each PALETTE entry, for drawing (the ward map). */
+const FAMILIES = ['blue', 'amber', 'violet', 'teal', 'rose', 'lime', 'cyan', 'orange'];
+
 export const NO_DISTRICT_CLASSES = 'bg-white text-stone-500 ring-stone-300';
+
+/** Colour family for the district at `rank`, or null when it has none. */
+export function districtFamily(rank: number): string | null {
+  return rank < 0 ? null : FAMILIES[rank % FAMILIES.length];
+}
 
 /** Tailwind classes for the district at `rank`; cycles past the palette end. */
 export function districtClasses(rank: number): string {

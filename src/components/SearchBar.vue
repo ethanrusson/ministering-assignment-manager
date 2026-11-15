@@ -20,7 +20,10 @@ export interface SearchTarget {
   kind: 'elder' | 'household';
   id: string;
   name: string;
-  companionshipId: string;
+  /** The board card it sits on. */
+  companionshipId?: string;
+  /** The map household it centers on. */
+  householdId?: string;
 }
 
 const props = defineProps<{

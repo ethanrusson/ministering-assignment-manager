@@ -9,11 +9,13 @@ import { useCompanionshipsStore } from '@/stores/companionships';
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue';
 import LabelsModal from '@/components/LabelsModal.vue';
 import ImportModal from '@/components/ImportModal.vue';
+import LocationImportModal from '@/components/LocationImportModal.vue';
 import WardInviteModal from '@/components/WardInviteModal.vue';
 import Canvas from '@/canvas/Canvas.vue';
 import District from '@/canvas/District.vue';
 import CompanionshipCard from '@/canvas/CompanionshipCard.vue';
 import CardGrid from '@/canvas/CardGrid.vue';
+import WardMap from '@/map/WardMap.vue';
 import { useBoardLayout } from '@/canvas/useBoardLayout';
 import TransferGhost from '@/canvas/TransferGhost.vue';
 import PickPlaceBar from '@/components/PickPlaceBar.vue';
@@ -39,6 +41,7 @@ import {
   ClockIcon,
   MoonIcon,
   SunIcon,
+  MapPinIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -72,6 +75,7 @@ useConnectionWatcher([
 
 const labelsOpen = ref(false);
 const importOpen = ref(false);
+const locationImportOpen = ref(false);
 const inviteOpen = ref(false);
 const changesOpen = ref(false);
 const loading = ref(true);
@@ -171,6 +175,7 @@ function cancelNameEdit() {
 }
 
 const canvasRef = ref<InstanceType<typeof Canvas> | null>(null);
+const mapRef = ref<InstanceType<typeof WardMap> | null>(null);
 
 // ─── Cmd+F search ──────────────────────────────────────────────────────────
 
@@ -179,6 +184,7 @@ const searchOpen = ref(false);
 // Build the ordered list of search targets (elders + households that appear
 // on cards) sorted by their card's position (top-to-bottom, left-to-right).
 const searchTargets = computed<SearchTarget[]>(() => {
+  if (layout.value === 'map') return mapSearchTargets.value;
   const cards = [...companionships.items].sort((a, b) => {
     if (a.position_y !== b.position_y) return a.position_y - b.position_y;
     return a.position_x - b.position_x;
@@ -199,7 +205,28 @@ const searchTargets = computed<SearchTarget[]>(() => {
   return out;
 });
 
+// On the map: every located household, and every elder whose home is located.
+const mapSearchTargets = computed<SearchTarget[]>(() => {
+  const located = (id: string | null) => {
+    const h = id ? households.byId.get(id) : null;
+    return h && !h.hidden && h.lat !== null ? h : null;
+  };
+  const out: SearchTarget[] = [];
+  for (const h of households.visible) {
+    if (located(h.id)) out.push({ kind: 'household', id: h.id, name: h.name, householdId: h.id });
+  }
+  for (const e of elders.visible) {
+    const home = located(e.home_household_id);
+    if (home) out.push({ kind: 'elder', id: e.id, name: e.name, householdId: home.id });
+  }
+  return out;
+});
+
 function gotoSearchTarget(target: SearchTarget) {
+  if (target.householdId) {
+    mapRef.value?.focusHousehold(target.householdId);
+    return;
+  }
   const cardEl = document.querySelector<HTMLElement>(
     `[data-companionship-id="${target.companionshipId}"]`,
   );
@@ -293,6 +320,7 @@ const settingsMenuItems = computed<MenuItem[]>(() => {
   const items: MenuItem[] = [
     { label: 'Manage Labels', icon: TagIcon, onClick: () => { labelsOpen.value = true; } },
     { label: 'Import LCR HTML', icon: ArrowDownTrayIcon, onClick: () => { importOpen.value = true; } },
+    { label: 'Import locations', icon: MapPinIcon, onClick: () => { locationImportOpen.value = true; } },
     { label: 'Clean up canvas', icon: SparklesIcon, onClick: cleanUp },
     { label: 'Download backup', icon: DocumentArrowDownIcon, onClick: downloadBackup },
     theme.isDark.value
@@ -385,7 +413,7 @@ const isEmptyCanvas = computed(
       <div class="flex items-center gap-2">
         <div class="flex rounded border border-stone-300 p-0.5 text-sm">
           <button
-            v-for="opt in (['canvas', 'grid'] as const)"
+            v-for="opt in (['canvas', 'grid', 'map'] as const)"
             :key="opt"
             class="rounded-sm px-2.5 py-0.5 capitalize"
             :class="layout === opt ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-100'"
@@ -447,7 +475,7 @@ const isEmptyCanvas = computed(
     </header>
 
     <main class="relative min-h-0 flex-1">
-      <LeftSidebar />
+      <LeftSidebar v-if="layout !== 'map'" />
       <section class="relative h-full overflow-hidden" data-drop-zone="canvas">
         <SearchBar
           :open="searchOpen"
@@ -461,6 +489,7 @@ const isEmptyCanvas = computed(
         >
           Loading…
         </div>
+        <WardMap v-else-if="layout === 'map'" ref="mapRef" />
         <div
           v-else-if="isEmptyCanvas"
           class="flex h-full items-center justify-center bg-stone-100"
@@ -493,6 +522,7 @@ const isEmptyCanvas = computed(
 
     <LabelsModal :open="labelsOpen" @close="labelsOpen = false" />
     <ImportModal :open="importOpen" @close="importOpen = false" />
+    <LocationImportModal :open="locationImportOpen" @close="locationImportOpen = false" />
     <WardInviteModal :open="inviteOpen" @close="inviteOpen = false" />
     <ChangesModal :open="changesOpen" @close="changesOpen = false" />
     <CardContextMenu

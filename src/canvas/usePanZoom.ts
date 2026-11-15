@@ -9,7 +9,8 @@
 //   screen = world * scale + translate
 //
 // Persists viewport to localStorage keyed by ward id so reloading returns
-// the user to the same view.
+// the user to the same view. The ward map reuses this with its own limits and
+// storage key (its world units are meters).
 
 import { reactive, watch } from 'vue';
 
@@ -23,14 +24,27 @@ interface Viewport {
   scale: number;
 }
 
-export function usePanZoom(wardIdRef: () => string | null) {
+interface PanZoomOptions {
+  storageKey?: string;
+  min?: number;
+  max?: number;
+}
+
+export function usePanZoom(
+  wardIdRef: () => string | null,
+  { storageKey = 'viewport', min = ZOOM_MIN, max = ZOOM_MAX }: PanZoomOptions = {},
+) {
   const state = reactive<Viewport>({ tx: 0, ty: 0, scale: 1 });
 
   // Hydrate from localStorage when the ward becomes known.
   watch(wardIdRef, (wid) => {
-    if (!wid) return;
-    const raw = localStorage.getItem(`viewport:${wid}`);
-    if (!raw) return;
+    if (wid) restore(wid);
+  });
+
+  /** Load the saved viewport for a ward; false when there is none. */
+  function restore(wid: string): boolean {
+    const raw = localStorage.getItem(`${storageKey}:${wid}`);
+    if (!raw) return false;
     try {
       const v = JSON.parse(raw) as Partial<Viewport>;
       if (
@@ -41,11 +55,13 @@ export function usePanZoom(wardIdRef: () => string | null) {
         state.tx = v.tx;
         state.ty = v.ty;
         state.scale = clampZoom(v.scale);
+        return true;
       }
     } catch {
       /* noop */
     }
-  });
+    return false;
+  }
 
   // Persist on change. Throttle is fine to skip — localStorage is fast.
   watch(
@@ -53,14 +69,14 @@ export function usePanZoom(wardIdRef: () => string | null) {
     ([, , , wid]) => {
       if (!wid) return;
       localStorage.setItem(
-        `viewport:${wid}`,
+        `${storageKey}:${wid}`,
         JSON.stringify({ tx: state.tx, ty: state.ty, scale: state.scale }),
       );
     },
   );
 
   function clampZoom(s: number) {
-    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s));
+    return Math.max(min, Math.min(max, s));
   }
 
   function panBy(dx: number, dy: number) {
@@ -99,7 +115,7 @@ export function usePanZoom(wardIdRef: () => string | null) {
     bbox: { x: number; y: number; w: number; h: number },
     screenViewport: { width: number; height: number },
     padding = 80,
-    maxScale: number = ZOOM_MAX,
+    maxScale: number = max,
   ) {
     const availW = Math.max(1, screenViewport.width - padding * 2);
     const availH = Math.max(1, screenViewport.height - padding * 2);
@@ -118,6 +134,7 @@ export function usePanZoom(wardIdRef: () => string | null) {
 
   return {
     state,
+    restore,
     panBy,
     zoomAt,
     zoomIn,

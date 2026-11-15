@@ -129,6 +129,19 @@ export const useHouseholdsStore = defineStore('households', () => {
     items.value = items.value.map((h) => fresh.get(h.id) ?? h);
   }
 
+  /** Saves district membership (D5) for many households in one request. */
+  async function setDistricts(updates: { id: string; district: string | null }[]) {
+    if (!updates.length) return;
+    const rows = updates.flatMap((u) => {
+      const h = byId.value.get(u.id);
+      return h ? [{ ...h, district_id: u.district }] : [];
+    });
+    const { data, error } = await supabase.from('households').upsert(rows).select();
+    if (error) throw error;
+    const fresh = new Map((data ?? []).map((h) => [h.id, h]));
+    items.value = items.value.map((h) => fresh.get(h.id) ?? h);
+  }
+
   /** Places a household by hand (D2: a later LCR location replaces it). */
   async function setManualLocation(id: string, lat: number, lng: number) {
     const { data, error } = await supabase
@@ -212,6 +225,7 @@ export const useHouseholdsStore = defineStore('households', () => {
     update,
     setLocations,
     setManualLocation,
+    setDistricts,
     setNote,
     remove,
     setLabels,

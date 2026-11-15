@@ -15,6 +15,7 @@ import { fitLabels } from './labels';
 import { homesToDraw, parseHouses } from './homes';
 import { emptyFilters, matches, statusOf } from './mapFilters';
 import { reassignOptions } from './reassign';
+import { assign, changesOf, toggle } from './districtEdit';
 import { fromBoundary, insertCorner, moveCorner, simplifyRing, snapCorner, toBoundary } from './boundary';
 import type { HouseholdFlag } from '@/lib/flags';
 import { overpassQuery, parseOverpass, placeStreetLabels, simplify } from './streets';
@@ -424,5 +425,57 @@ describe('ward boundary editing', () => {
   it('adds a corner in the middle of an edge', () => {
     expect(insertCorner(square, 3)[4]).toEqual({ x: 0, y: 50 });
     expect(insertCorner(square, 3)).toHaveLength(5);
+  });
+});
+
+describe('district membership editing', () => {
+  const h = (id: string, saved: string | null, comp: string | null) => ({ id, saved, companionshipDistrict: comp });
+
+  it('starts each household in its companionship district until the first save', () => {
+    const hs = [h('a', null, 'd1'), h('b', null, null)];
+    const { writes, listed } = changesOf(hs, new Map());
+    expect(writes).toEqual([{ id: 'a', district: 'd1' }]);
+    // Nothing is "changed" from that starting point yet.
+    expect(listed).toEqual([]);
+  });
+
+  it('uses saved districts once any household has one', () => {
+    const hs = [h('a', 'd2', 'd1'), h('b', null, 'd1')];
+    expect(changesOf(hs, new Map())).toEqual({ writes: [], listed: [] });
+  });
+
+  it('toggles a stack in and out of the picked district as a unit', () => {
+    const current = (id: string) => (id === 'a' ? 'd1' : 'd2');
+    const into = toggle(new Map(), ['a', 'b'], 'd1', current);
+    expect([...into]).toEqual([
+      ['a', 'd1'],
+      ['b', 'd1'],
+    ]);
+    const out = toggle(into, ['a', 'b'], 'd1', (id) => into.get(id)!);
+    expect([...out]).toEqual([
+      ['a', null],
+      ['b', null],
+    ]);
+  });
+
+  it('assigns a lasso of households at once', () => {
+    expect([...assign(new Map([['a', null]]), ['a', 'b'], 'd3')]).toEqual([
+      ['a', 'd3'],
+      ['b', 'd3'],
+    ]);
+  });
+
+  it('says whether a change creates or clears "ministered from another district"', () => {
+    const hs = [h('a', 'd1', 'd1'), h('b', 'd2', 'd1'), h('c', 'd1', null)];
+    const draft = new Map([
+      ['a', 'd2'],
+      ['b', 'd1'],
+      ['c', 'd2'],
+    ]);
+    expect(changesOf(hs, draft).listed).toEqual([
+      { id: 'a', from: 'd1', to: 'd2', flag: 'creates' },
+      { id: 'b', from: 'd2', to: 'd1', flag: 'clears' },
+      { id: 'c', from: 'd1', to: 'd2', flag: null },
+    ]);
   });
 });

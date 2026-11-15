@@ -38,6 +38,7 @@ const emit = defineEmits<{
   (e: 'update:colorBy', v: ColorBy): void;
   (e: 'update:showAreas', v: boolean): void;
   (e: 'editBoundary'): void;
+  (e: 'editDistricts'): void;
   (e: 'focusHousehold', id: string): void;
 }>();
 
@@ -228,12 +229,19 @@ const companionshipGaps = computed(() =>
       </section>
 
       <section v-if="districtRows.length">
-        <div class="mb-1.5 flex items-center gap-2">
-          <h3 class="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
+        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
+        <div class="mb-2 flex flex-wrap gap-1">
+          <button
+            type="button"
+            class="rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
+            @click="emit('editDistricts')"
+          >
+            Edit districts
+          </button>
           <button
             v-if="auth.wardRole === 'admin'"
             type="button"
-            class="ml-auto rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
+            class="rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
             @click="emit('editBoundary')"
           >
             Edit boundary
@@ -241,10 +249,7 @@ const companionshipGaps = computed(() =>
           <button
             type="button"
             class="rounded-full border px-2.5 py-0.5 text-xs"
-            :class="[
-              showAreas ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50',
-              auth.wardRole === 'admin' ? '' : 'ml-auto',
-            ]"
+            :class="showAreas ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
             :aria-pressed="showAreas"
             @click="emit('update:showAreas', !showAreas)"
           >

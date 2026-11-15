@@ -108,6 +108,29 @@ export function computeFlags(input: FlagInput): Flags {
   return { households, elders };
 }
 
+/** The midpoint of a companionship's ministers' homes; null if none is located. */
+export function ministersHub(
+  companionshipId: string,
+  eldersInCompanionship: Map<string, string[]>,
+  homeOf: Map<string, string>,
+  located: Map<string, LatLng>,
+): LatLng | null {
+  const homes = (eldersInCompanionship.get(companionshipId) ?? [])
+    .map((e) => homeOf.get(e))
+    .map((h) => (h ? located.get(h) : undefined))
+    .filter((p): p is LatLng => !!p);
+  if (!homes.length) return null;
+  return {
+    lat: homes.reduce((s, p) => s + p.lat, 0) / homes.length,
+    lng: homes.reduce((s, p) => s + p.lng, 0) / homes.length,
+  };
+}
+
+/** Straight-line meters between two lat/lng points. */
+export function metersBetween(a: LatLng, b: LatLng): number {
+  return distance({ x: 0, y: 0 }, project(b, a));
+}
+
 /** Meters from a household to the midpoint of its ministers' homes; null if none is located. */
 export function distanceToMinisters(
   here: LatLng,
@@ -116,14 +139,6 @@ export function distanceToMinisters(
   homeOf: Map<string, string>,
   located: Map<string, LatLng>,
 ): number | null {
-  const homes = (input.eldersInCompanionship.get(companionshipId) ?? [])
-    .map((e) => homeOf.get(e))
-    .map((h) => (h ? located.get(h) : undefined))
-    .filter((p): p is LatLng => !!p);
-  if (!homes.length) return null;
-  const hub = {
-    lat: homes.reduce((s, p) => s + p.lat, 0) / homes.length,
-    lng: homes.reduce((s, p) => s + p.lng, 0) / homes.length,
-  };
-  return distance({ x: 0, y: 0 }, project(here, hub));
+  const hub = ministersHub(companionshipId, input.eldersInCompanionship, homeOf, located);
+  return hub ? metersBetween(hub, here) : null;
 }

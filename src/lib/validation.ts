@@ -23,7 +23,7 @@ export interface CompanionshipWarning {
   message: string;
 }
 
-const HOUSEHOLD_LIMIT = 5;
+export const HOUSEHOLD_LIMIT = 5;
 
 export function validateCompanionship(
   c: ValidationCompanionship,

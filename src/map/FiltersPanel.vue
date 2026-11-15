@@ -10,8 +10,8 @@ import { useDistrictsStore } from '@/stores/districts';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
 import { useLabelsStore } from '@/stores/labels';
-import { districtLabel } from '@/canvas/districtColors';
-import { validateCompanionship } from '@/lib/validation';
+import { districtFamily, districtLabel } from '@/canvas/districtColors';
+import { HOUSEHOLD_LIMIT, validateCompanionship } from '@/lib/validation';
 import { labelChipStyle } from '@/lib/labelColors';
 import {
   ELDER_FLAG_LABELS,
@@ -84,6 +84,26 @@ const elderGaps = computed(() =>
         .sort((a, b) => a.name.localeCompare(b.name)),
     }))
     .filter((g) => g.items.length),
+);
+
+/**
+ * Per district: households (by their companionship's district until Phase 6),
+ * companionships, and slots at HOUSEHOLD_LIMIT each.
+ */
+const districtRows = computed(() =>
+  districts.items.map((d, i) => {
+    const comps = companionships.items.filter((c) => c.district_id === d.id);
+    const homes = comps.reduce(
+      (n, c) =>
+        n +
+        (companionships.householdsInCompanionship.get(c.id) ?? []).filter(
+          (h) => households.byId.get(h)?.hidden === false,
+        ).length,
+      0,
+    );
+    const slots = comps.length * HOUSEHOLD_LIMIT;
+    return { id: d.id, label: `${districtLabel(i)} · ${d.name}`, family: districtFamily(i), homes, comps: comps.length, slots, open: slots - homes };
+  }),
 );
 
 /** Companionships breaking a board validation rule (over capacity, no district, …). */
@@ -198,6 +218,38 @@ const companionshipGaps = computed(() =>
             </button>
           </div>
         </div>
+      </section>
+
+      <section v-if="districtRows.length">
+        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
+        <table class="w-full text-xs">
+          <thead class="text-stone-500">
+            <tr>
+              <th class="text-left font-normal"></th>
+              <th class="text-right font-normal">Homes</th>
+              <th class="text-right font-normal">Comps</th>
+              <th class="text-right font-normal">Slots</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in districtRows" :key="r.id">
+              <td class="py-0.5">
+                <span
+                  class="rounded-full px-2 py-px font-semibold"
+                  :style="{ backgroundColor: v(`${r.family}-100`), color: v(`${r.family}-700`) }"
+                >
+                  {{ r.label }}
+                </span>
+                <span class="ml-1" :class="r.open < 0 ? 'font-semibold text-red-700' : 'text-stone-500'">
+                  {{ r.open < 0 ? `short ${-r.open}` : `${r.open} open` }}
+                </span>
+              </td>
+              <td class="text-right tabular-nums">{{ r.homes }}</td>
+              <td class="text-right tabular-nums">{{ r.comps }}</td>
+              <td class="text-right tabular-nums">{{ r.slots }}</td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section>

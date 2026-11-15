@@ -292,12 +292,12 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
    - the four nearest companionships, measured to the midpoint between the ministers' homes, plus the current one and "No companionship"
    - each row shows its district, distance, and households after the move against the limit (e.g. 6/5 in red)
 2. Choosing a row writes `companionship_households` through the existing store, so the board, worklist and realtime update.
-3. A districts panel: for each district, households, companionships, slots (companionships × 5) and open or short slots. Before Phase 6 this counts households by their companionship's district; after Phase 6, by `households.district_id`.
-4. The gaps panel (Phase 3) links straight into reassigning.
+3. A districts panel: for each district, households, companionships, slots (companionships × 5) and open or short slots. Before Phase 6 this counts households by their companionship's district; after Phase 6, by `households.district_id`. Built as a "Districts" section of the Filters & gaps panel.
+4. The gaps panel (Phase 3) links straight into reassigning: a household picked from Gaps opens with its Reassign list showing.
 
 **Acceptance**
 - A reassignment on the map appears on the board and in the worklist without a reload, and in another signed-in session through realtime.
-- Undo restores the previous assignment. Use whatever mechanism the board uses, if any; otherwise a one-step undo toast.
+- Undo restores the previous assignment. Use whatever mechanism the board uses, if any; otherwise a one-step undo toast. (The board has none, so it's a toast with Undo, open for 8 seconds.)
 
 **Checkpoint 4**
 - Is "nearest four" the right list, or should it be "nearest with open slots"?

@@ -13,6 +13,7 @@ import {
 import { fitLabels } from './labels';
 import { homesToDraw, parseHouses } from './homes';
 import { emptyFilters, matches, statusOf } from './mapFilters';
+import { reassignOptions } from './reassign';
 import type { HouseholdFlag } from '@/lib/flags';
 import { overpassQuery, parseOverpass, placeStreetLabels, simplify } from './streets';
 import { allConnections, buildConnections, type MinisteringModel } from './connections';
@@ -330,5 +331,40 @@ describe('map filters', () => {
     expect(statusOf(['location_changed', 'no_companionship'])).toBe('no_companionship');
     expect(statusOf(['location_changed', 'far_from_ministers'])).toBe('far_from_ministers');
     expect(statusOf(['new_since_import'])).toBe('ok');
+  });
+});
+
+describe('reassignOptions', () => {
+  // 0.001° latitude ≈ 110 m.
+  const c = (id: string, lat: number | null) => ({ id, hub: lat === null ? null : { lat, lng: 0 } });
+  const here = { lat: 0, lng: 0 };
+
+  it('lists the four nearest, unlocated ones last', () => {
+    const opts = reassignOptions(here, [c('far', 0.01), c('none', null), c('a', 0.001), c('b', 0.002), c('c', 0.003)], null);
+    expect(opts.map((o) => o.id)).toEqual(['a', 'b', 'c', 'far']);
+    expect(opts[0].meters).toBeCloseTo(110.54, 1);
+  });
+
+  it('adds the current companionship when it is not among the nearest', () => {
+    const opts = reassignOptions(here, [c('a', 0.001), c('b', 0.002), c('c', 0.003), c('d', 0.004), c('cur', 0.05)], 'cur');
+    expect(opts.map((o) => [o.id, o.current])).toEqual([
+      ['a', false],
+      ['b', false],
+      ['c', false],
+      ['d', false],
+      ['cur', true],
+    ]);
+  });
+
+  it('marks the current one in place when it is near', () => {
+    const opts = reassignOptions(here, [c('a', 0.001), c('cur', 0.002)], 'cur');
+    expect(opts.map((o) => [o.id, o.current])).toEqual([
+      ['a', false],
+      ['cur', true],
+    ]);
+  });
+
+  it('keeps candidate order when the household has no location', () => {
+    expect(reassignOptions(null, [c('a', 0.001), c('b', 0.002)], 'b').map((o) => o.id)).toEqual(['a', 'b']);
   });
 });

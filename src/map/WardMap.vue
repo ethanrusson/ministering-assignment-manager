@@ -17,7 +17,11 @@ import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useStreetsStore } from '@/stores/streets';
 import { useHomesStore } from '@/stores/homes';
-import { pushError } from '@/lib/errorToast';
+import { pushError, pushInfo } from '@/lib/errorToast';
+import { applyAssignment, type Destination } from '@/lib/assignment';
+import { companionshipTitle, HOUSEHOLD_LIMIT } from '@/lib/validation';
+import { ministersHub } from '@/lib/flags';
+import { reassignOptions } from './reassign';
 import { usePanZoom, ZOOM_STEP } from '@/canvas/usePanZoom';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
 import {
@@ -68,6 +72,9 @@ const SQUARE = 22;
 /** How far each household sharing a point peeks out behind the front one, in px. */
 const STACK_OFFSET = 4;
 const POPOVER_W = 290;
+/** Popover keeps this far from the top edge, and clear of the bottom toolbar. */
+const POPOVER_MARGIN = 16;
+const TOOLBAR_CLEARANCE = 88;
 
 const auth = useAuthStore();
 const elders = useEldersStore();
@@ -367,7 +374,15 @@ const popover = computed(() => {
   const screenY = at.y + vp.ty;
   const gap = 20;
   const left = screenX + gap + POPOVER_W > visibleWidth.value;
-  const above = screenY > size.value.h * 0.55;
+  // Open toward whichever side of the mark has more room, clear of the screen
+  // edge and the toolbar, scrolling if it's still too long.
+  const topLimit = POPOVER_MARGIN;
+  const bottomLimit = size.value.h - TOOLBAR_CLEARANCE;
+  const above = screenY + 24 - topLimit > bottomLimit - (screenY - 24);
+  const anchorY = above
+    ? Math.min(bottomLimit, screenY + 24)
+    : Math.max(topLimit, Math.min(screenY - 24, bottomLimit - 120));
+  const maxHeight = above ? anchorY - topLimit : bottomLimit - anchorY;
 
   return {
     name: h.name,
@@ -397,9 +412,10 @@ const popover = computed(() => {
     residents,
     style: {
       left: `${at.x}px`,
-      top: `${at.y}px`,
+      top: `${anchorY - vp.ty}px`,
       width: `${POPOVER_W}px`,
-      transform: `translate(${left ? `calc(-100% - ${gap}px)` : `${gap}px`}, ${above ? 'calc(-100% + 24px)' : '-24px'})`,
+      maxHeight: `${maxHeight}px`,
+      transform: `translate(${left ? `calc(-100% - ${gap}px)` : `${gap}px`}, ${above ? '-100%' : '0'})`,
     },
   };
 });
@@ -407,10 +423,75 @@ const popover = computed(() => {
 function select(id: string) {
   selectedId.value = id;
   editingLabels.value = false;
+  reassigning.value = false;
   acknowledging.value = false;
 }
 
 const editingLabels = ref(false);
+
+// ─── Reassign (Phase 4) ────────────────────────────────────────────────────
+
+const reassigning = ref(false);
+
+const locatedLatLng = computed(
+  () => new Map(located.value.map((h) => [h.id, { lat: h.lat!, lng: h.lng! }])),
+);
+
+function compTitle(companionshipId: string): string {
+  return companionshipTitle(
+    (companionships.eldersInCompanionship.get(companionshipId) ?? []).map(
+      (e) => elders.byId.get(e)?.name ?? '',
+    ),
+  );
+}
+
+/** Nearest companionships for the selected household, with households-after-move counts. */
+const reassignRows = computed(() => {
+  const id = selectedId.value;
+  if (!id) return [];
+  const current = companionships.companionshipForHousehold.get(id) ?? null;
+  const candidates = companionships.items.map((c) => ({
+    id: c.id,
+    hub: ministersHub(c.id, companionships.eldersInCompanionship, model.value.homeOf, locatedLatLng.value),
+  }));
+  return reassignOptions(locatedLatLng.value.get(id) ?? null, candidates, current).map((o) => {
+    const districtId = companionships.byId.get(o.id)?.district_id;
+    const rank = districtId ? districts.items.findIndex((d) => d.id === districtId) : -1;
+    const count = (companionships.householdsInCompanionship.get(o.id)?.length ?? 0) + (o.current ? 0 : 1);
+    return {
+      ...o,
+      title: compTitle(o.id),
+      family: districtFamily(rank),
+      district: districtLabel(rank),
+      count,
+      over: count > HOUSEHOLD_LIMIT,
+    };
+  });
+});
+
+const toDestination = (companionshipId: string | null): Destination =>
+  companionshipId ? { kind: 'companionship', id: companionshipId } : { kind: 'unassigned' };
+
+/** Moves the selected household, with a one-step Undo. Same write path as the board. */
+async function reassign(to: string | null) {
+  const id = selectedId.value;
+  if (!id) return;
+  const subject = { kind: 'household' as const, id };
+  const before = companionships.companionshipForHousehold.get(id) ?? null;
+  const result = await applyAssignment(subject, toDestination(to));
+  if (!result.ok || !result.changed) return;
+  const name = labelNames(households.byId.get(id)?.name ?? '').long;
+  pushInfo(to ? `Moved ${name} to ${compTitle(to)}.` : `${name} now has no companionship.`, {
+    label: 'Undo',
+    run: () => applyAssignment(subject, toDestination(before)),
+  });
+}
+
+/** From the gaps list: select the household with its reassign list open. */
+function focusForReassign(id: string) {
+  focusHousehold(id);
+  reassigning.value = true;
+}
 /** The "far from ministers" acknowledgement form is open, with its optional note. */
 const acknowledging = ref(false);
 const ackNote = ref('');
@@ -878,7 +959,7 @@ onBeforeUnmount(() => {
       <div
         v-if="popover"
         data-no-pan
-        class="absolute z-20 flex cursor-default flex-col gap-2.5 rounded-xl border border-stone-200 bg-white p-3 text-left text-sm shadow-xl"
+        class="absolute z-20 flex cursor-default flex-col gap-2.5 overflow-y-auto rounded-xl border border-stone-200 bg-white p-3 text-left text-sm shadow-xl"
         :style="popover.style"
       >
         <div class="flex items-start gap-2">
@@ -983,6 +1064,45 @@ onBeforeUnmount(() => {
 
         <LabelPicker v-if="editingLabels" :household-id="selectedId!" />
 
+        <div v-if="reassigning || !popover.companionshipId">
+          <div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+            Reassign · nearest first
+          </div>
+          <div class="flex flex-col gap-1">
+            <button
+              v-for="o in reassignRows"
+              :key="o.id"
+              type="button"
+              class="flex items-center gap-2 rounded-md border px-2 py-1 text-left text-[13px]"
+              :class="o.current ? 'border-stone-800 bg-stone-100' : 'border-stone-200 hover:bg-stone-50'"
+              :aria-pressed="o.current"
+              @click="reassign(o.id)"
+            >
+              <span
+                class="h-2 w-2 shrink-0 rounded-sm"
+                :style="{ backgroundColor: v(o.family ? `${o.family}-500` : 'stone-300') }"
+              />
+              <span class="min-w-0 flex-1 truncate">{{ o.title }}</span>
+              <span
+                class="whitespace-nowrap text-[11px] tabular-nums"
+                :class="o.over ? 'font-semibold text-red-700' : 'text-stone-500'"
+              >
+                {{ o.district }} · {{ o.meters === null ? '—' : formatMiles(o.meters) }} ·
+                {{ o.count }}/{{ HOUSEHOLD_LIMIT }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="rounded-md border px-2 py-1 text-left text-[13px]"
+              :class="!popover.companionshipId ? 'border-stone-800 bg-stone-100' : 'border-stone-200 hover:bg-stone-50'"
+              :aria-pressed="!popover.companionshipId"
+              @click="reassign(null)"
+            >
+              No companionship
+            </button>
+          </div>
+        </div>
+
         <textarea
           v-if="sensitive.show.value"
           :key="selectedId!"
@@ -994,6 +1114,14 @@ onBeforeUnmount(() => {
         />
 
         <div class="flex gap-3 text-xs">
+          <button
+            v-if="popover.companionshipId"
+            type="button"
+            class="text-blue-700 hover:underline"
+            @click="reassigning = !reassigning"
+          >
+            {{ reassigning ? 'Hide reassign' : 'Reassign' }}
+          </button>
           <button type="button" class="text-blue-700 hover:underline" @click="editingLabels = !editingLabels">
             {{ editingLabels ? 'Done' : 'Labels' }}
           </button>
@@ -1043,7 +1171,7 @@ onBeforeUnmount(() => {
       :flags="flags"
       :match-count="matched ? matched.size : null"
       @close="filtersOpen = false"
-      @focus-household="focusHousehold"
+      @focus-household="focusForReassign"
     />
 
     <LocationsPanel

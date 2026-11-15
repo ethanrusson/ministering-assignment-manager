@@ -8,6 +8,8 @@ export interface Toast {
   id: number;
   message: string;
   kind: 'error' | 'info';
+  /** A one-tap follow-up, e.g. Undo. Runs once, then the toast closes. */
+  action?: { label: string; run: () => unknown };
 }
 
 const toasts = ref<Toast[]>([]);
@@ -25,6 +27,15 @@ export function pushError(err: unknown) {
   window.setTimeout(() => {
     toasts.value = toasts.value.filter((t) => t.id !== id);
   }, 6000);
+}
+
+/** A short confirmation, optionally with one action such as Undo. */
+export function pushInfo(message: string, action?: Toast['action']) {
+  const id = nextId++;
+  toasts.value.push({ id, message, kind: 'info', action });
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id);
+  }, 8000);
 }
 
 function errorMessage(err: unknown): string {

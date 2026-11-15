@@ -38,7 +38,7 @@ The work is split into phases. Each phase can be shipped and tested on its own. 
 | 2 | Locations review queue and hand placement | 1 |
 | 3 | Flags and labels on the map: taxonomy, display, filters | 1 |
 | 4 | Reassign from the map; gaps and capacity panels | 1, 3 |
-| 5 | Streets: import and editor | 1 |
+| 5 | Streets: import (done) and editor (deferred) | 1 |
 | 6 | Ward boundary and districts: household membership, automatic boundaries | 4, 5 |
 | 7 | Later: board card warnings and other follow-ups | 6 |
 
@@ -50,7 +50,7 @@ Phases 2, 3 and 5 depend only on Phase 1 and can be reordered at a checkpoint.
 |---|---|
 | D1 | The map is drawn by the app (SVG). No tile provider, API keys or third-party map services. |
 | D2 | Household coordinates come from LCR. A household with no coordinates in LCR can be placed by hand. On re-import, LCR coordinates replace any hand placement. |
-| D3 | Stored coordinates are never changed for display. Spreading out overlapping squares and grouping households at the same point happen only when drawing. |
+| D3 | Stored coordinates are never changed for display, and marks are always drawn exactly at their location. Crowding is handled by leaving names out, never by moving marks. Households at the same point stack behind one square. |
 | D4 | Households and elders are matched to LCR by person UUID, not by name. |
 | D5 | A household's district is set directly (`households.district_id`). District areas on the map are worked out from that membership; they are never drawn by hand. |
 | D6 | District boundaries follow streets where streets separate households of different districts. Elsewhere they run halfway between neighboring homes. |
@@ -59,7 +59,8 @@ Phases 2, 3 and 5 depend only on Phase 1 and can be reordered at a checkpoint.
 | D9 | Reassignments made on the map write to the same tables as the board, so they appear in the existing worklist and change tracking. |
 | D10 | Distances are straight-line, shown in miles. |
 | D11 | Districts are the existing `districts` rows, which are imported from LCR. No separate map-only district entity. |
-| D12 | The only outside request the map makes is an optional one-time OpenStreetMap street download, which sends only the ward's map area. No member data is sent anywhere. |
+| D12 | The only outside request the map makes is an optional one-time OpenStreetMap street download, which sends only the ward's map area. Building footprints for non-member houses are fetched by a local script (`scripts/footprints.ts`) and pasted in, not by the app. No member data is sent anywhere. |
+| D13 | Non-member houses are drawn as faint squares so it's clear when other homes sit between member homes. They come from Microsoft's open building footprints or are placed by hand, and a house under a member household isn't drawn. |
 
 ## Data model changes
 
@@ -96,18 +97,23 @@ All new columns are nullable unless noted. All tables are ward-scoped and use th
 - `geometry jsonb` — GeoJSON LineString in lat/lng
 - `smooth boolean default false`, `source text check in ('osm','manual')`, `osm_id text`, `created_at`
 
+**homes** (non-member houses, D13; migration 0006)
+- `id, ward_id, lat, lng, source text check in ('footprint','manual'), created_at`
+
 Label-related changes are defined in Phase 3, after its checkpoint.
 
 ## Coordinates and rendering
 
 - **Projection.** Use a flat (equirectangular) projection centered on the ward: `x = (lng − lng0) · cos(lat0) · 111320`, `y = −(lat − lat0) · 110540`, in meters. The center (`lat0`, `lng0`) is the middle of the ward boundary, or of all households if there is no boundary yet. Store everything in lat/lng and project only when drawing.
 - **Rendering.** One SVG layer for ward area, district areas, streets and lines, with an HTML layer above it for household squares, names and popovers. Pan and zoom reuse `usePanZoom` or an equivalent, with the viewport saved per ward.
-- **Household square.** 22 px square with the name label underneath, always shown. Squares and labels keep a constant size on screen while zooming; positions scale. The tappable area covers the square and the label. Marks on the square:
+- **Household square.** 22 px square with its name below (or above) when it fits. Squares and labels keep a constant size on screen while zooming; positions scale. The tappable area covers the square and the label. Marks on the square:
   - a dot inside: a minister lives here; red if that elder has no companionship
   - up to two label dots at the top-right corner, then "+n"
   - a selection ring
-- **Crowding.** When squares or labels overlap on screen, they are nudged apart for display only (D3). The existing `autoNudge` logic is a candidate.
-- **Shared points.** Households with identical coordinates are drawn as one box listing every name, titled with the location group name if one exists.
+- **Crowding.** Marks never move (D3). A name shows only where it covers no other name and no other household's square: surname below the square, else above, then "Surname, I." where the longer form still fits. The selected household always shows its full name, and its connections get first claim on space. Tapping the same spot again steps through every household whose square is there.
+- **Shared points.** Households with identical coordinates (in practice, one family's house) stack: the others peek out behind the front square, and the front household's name shows. Tapping steps through them.
+- **Non-member houses.** Faint 22 px squares with no border, in the residential street color, under everything else (D13).
+- **Fit.** Frames the households, leaving out lone pins with no other household within 1 km.
 - **Dark mode.** All map colors use the existing CSS-variable palette and follow the app theme.
 - **Touch.** The map respects the existing view/edit lock (`useViewMode`). In view mode, a tap selects and a drag pans.
 
@@ -179,16 +185,16 @@ Label-related changes are defined in Phase 3, after its checkpoint.
 1. Each location import creates `location_reviews` rows for:
    - `no_location`: the household has no coordinates in LCR.
    - `moved`: coordinates changed by more than a threshold (default 50 m). Store the previous and new positions.
-   - `shared_location`: two or more households have identical coordinates and no location group.
+   - ~~`shared_location`~~: dropped (Checkpoint 1). Households at one point are one family's house and stack on the map; revisit for a ward with apartments.
    - `outside_ward`: created once a ward boundary exists (Phase 6). Skipped until then.
 2. A Locations screen: the queue on the left, the map in the middle, and details with actions for the selected item.
    - `no_location`: drag the household from the queue onto the map → `location_source = 'manual'`. Or leave it unplaced.
    - `moved`: show the old and new positions with an arrow and the effect on its district and ministers. Accept and keep ministers, or accept and open reassign (reassign arrives in Phase 4; until then, accept only).
-   - `shared_location`: name the group (creates a `location_groups` row) or leave it ungrouped.
    - `outside_ward`: keep (dismiss with a reason), adjust the boundary, or mark as moved out (hides the household).
 3. Dismissed items stay dismissed across imports until the underlying data changes again.
 4. A map toolbar badge shows the number of open items.
 5. "Adjust location" from the household popover lets the user drag that household. It sets `location_source = 'manual'` and creates no review item.
+6. "Lives at" for elders the location import couldn't link (Checkpoint 0): pick their home on the map.
 
 **Acceptance**
 - Importing the same data twice creates no duplicate review items.
@@ -291,17 +297,17 @@ Data changes for labels are written into this document after the checkpoint.
 **Goal:** streets for orientation, and as the edges district boundaries follow (D6).
 
 **Scope**
-1. **Import.** One-time download of road lines inside the ward boundary from OpenStreetMap (Overpass API), sending only the ward's map area (D12). Before a ward boundary exists, use the area around all households plus a margin. The import is simplified into `streets` rows:
-   - kinds `main` (OSM primary, secondary, tertiary), `residential` (residential, unclassified) and `lane` (service, private)
+1. **Import** (done). One-time download of road lines inside the ward boundary from OpenStreetMap (Overpass API), sending only the ward's map area (D12). Before a ward boundary exists, use the area around all households plus a margin. The import is simplified into `streets` rows:
+   - kinds `main` (OSM primary, secondary, tertiary and their links), `residential` (residential, unclassified, living street) and `lane` (service, except parking aisles and drive-throughs)
    - footpaths excluded
    - names from OSM
-2. **Editor** (Edit streets screen):
+2. **Editor** (Edit streets screen; deferred until the OSM data turns out to need hand fixes):
    - move points
    - draw a street by clicking points; double-click or Enter finishes; ends snap to nearby streets
    - delete a point or a whole street
    - edit name, kind and the smooth flag (draws a curve through the points)
    - a toggle to show household squares to trace between
-3. Rendering: `main` thick, `residential` medium, `lane` thin and dotted. Names drawn along or beside the street.
+3. Rendering (done): `main` thick, `residential` medium, `lane` thin and dotted. Names drawn along the longest stretch of each road.
 4. "Start blank": remove imported streets and draw by hand only.
 
 **Acceptance**
@@ -384,9 +390,9 @@ Questions are answered at each checkpoint and moved into the decision list or th
 |---|---|---|
 | 0 | Coordinate source and format | Member Directory API `GET /api/v4/households?unit=<unitNumber>`: raw JSON array, opened in a tab and pasted. See `docs/lcr-directory-structure.md`. |
 | 0 | Household members included? | Yes: every member with person `uuid` (same as ministering `personUuid`) and a `head` flag. |
-| 1 | Label density rule | |
-| 1 | Square size | |
-| 1 | Coloring before Phase 6 | |
+| 1 | Label density rule | Marks never move; names show only where they fit (below, then above), with initials added when there's room. The selection always keeps its name. |
+| 1 | Square size | 22 px kept on desktop. Not yet checked on iPad. |
+| 1 | Coloring before Phase 6 | The companionship's district, as built. |
 | 2 | "Moved" threshold | |
 | 3 | Label taxonomy and seed set | |
 | 3 | Labels on elders | |
@@ -397,6 +403,6 @@ Questions are answered at each checkpoint and moved into the decision list or th
 | 3 | Label palette | |
 | 4 | Reassign list contents | |
 | 4 | Configurable household limit | |
-| 5 | OSM import vs hand drawing | |
+| 5 | OSM import vs hand drawing | The OSM import is good enough for this ward (99 streets); the editor is deferred. |
 | 6 | Move-in automatic district | |
 | 6 | Districts in snapshots | |

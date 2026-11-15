@@ -6,6 +6,7 @@ import {
   project,
   projectionOrigin,
   scaleBar,
+  outlineAround,
   toBBox,
   unproject,
   wardBounds,
@@ -14,6 +15,7 @@ import { fitLabels } from './labels';
 import { homesToDraw, parseHouses } from './homes';
 import { emptyFilters, matches, statusOf } from './mapFilters';
 import { reassignOptions } from './reassign';
+import { fromBoundary, insertCorner, moveCorner, simplifyRing, snapCorner, toBoundary } from './boundary';
 import type { HouseholdFlag } from '@/lib/flags';
 import { overpassQuery, parseOverpass, placeStreetLabels, simplify } from './streets';
 import { allConnections, buildConnections, type MinisteringModel } from './connections';
@@ -366,5 +368,61 @@ describe('reassignOptions', () => {
 
   it('keeps candidate order when the household has no location', () => {
     expect(reassignOptions(null, [c('a', 0.001), c('b', 0.002)], 'b').map((o) => o.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('outlineAround', () => {
+  it('wraps the households with a margin, leaving out lone pins', () => {
+    const pts = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 100 }, { x: 5000, y: 5000 }];
+    const ring = outlineAround(pts, 10);
+    const xs = ring.map((p) => p.x);
+    const ys = ring.map((p) => p.y);
+    expect(Math.min(...xs)).toBeCloseTo(-10, 6);
+    expect(Math.max(...xs)).toBeCloseTo(110, 6);
+    expect(Math.max(...ys)).toBeCloseTo(110, 6);
+  });
+});
+
+describe('ward boundary editing', () => {
+  const origin = { lat: 40, lng: -111 };
+  const square = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+
+  it('round-trips through the stored GeoJSON polygon', () => {
+    const b = toBoundary(square, origin);
+    expect(b.type).toBe('Polygon');
+    expect(b.coordinates[0]).toHaveLength(5);
+    expect(b.coordinates[0][0]).toEqual(b.coordinates[0][4]);
+    fromBoundary(b, origin).forEach((p, i) => {
+      expect(p.x).toBeCloseTo(square[i].x, 0);
+      expect(p.y).toBeCloseTo(square[i].y, 0);
+    });
+  });
+
+  it('simplifies a dense outline to its real corners', () => {
+    const dense = [
+      ...[0, 25, 50, 75].map((x) => ({ x, y: 0 })),
+      ...[0, 25, 50, 75].map((y) => ({ x: 100, y })),
+      ...[100, 75, 50, 25].map((x) => ({ x, y: 100 })),
+      ...[100, 75, 50, 25].map((y) => ({ x: 0, y })),
+    ];
+    expect(simplifyRing(dense, 1)).toHaveLength(4);
+  });
+
+  it('snaps to a nearby corner first, then to a street', () => {
+    const streets = [[{ x: 0, y: 50 }, { x: 200, y: 50 }]];
+    expect(snapCorner({ x: 98, y: 3 }, square, streets, 5)).toEqual({ at: { x: 100, y: 0 }, onCorner: 1 });
+    expect(snapCorner({ x: 150, y: 53 }, square, streets, 5)).toEqual({ at: { x: 150, y: 50 }, onCorner: null });
+    expect(snapCorner({ x: 150, y: 70 }, square, streets, 5).at).toEqual({ x: 150, y: 70 });
+  });
+
+  it('removes a corner dropped onto its neighbour, but keeps at least three', () => {
+    expect(moveCorner(square, 0, square[1], 1)).toHaveLength(3);
+    expect(moveCorner(square.slice(0, 3), 0, square[1], 1)).toHaveLength(3);
+    expect(moveCorner(square, 0, { x: -5, y: -5 }, null)[0]).toEqual({ x: -5, y: -5 });
+  });
+
+  it('adds a corner in the middle of an edge', () => {
+    expect(insertCorner(square, 3)[4]).toEqual({ x: 0, y: 50 });
+    expect(insertCorner(square, 3)).toHaveLength(5);
   });
 });

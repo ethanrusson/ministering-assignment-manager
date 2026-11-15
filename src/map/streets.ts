@@ -3,7 +3,7 @@
 // map's bounding box and nothing else.
 
 import type { StreetKind } from '@/types/database';
-import { project, type BBox, type LatLng, type Point } from './geo';
+import { keepIndices, project, type BBox, type LatLng, type Point } from './geo';
 
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
@@ -73,35 +73,8 @@ export function parseOverpass(json: unknown): ImportedStreet[] {
 /** Douglas–Peucker in local meters. Endpoints always survive. */
 export function simplify(pts: LatLng[], toleranceM: number): LatLng[] {
   if (pts.length < 3) return pts;
-  const xy = pts.map((p) => project(p, pts[0]));
-  const keep = new Array<boolean>(pts.length).fill(false);
-  keep[0] = keep[pts.length - 1] = true;
-  const stack: [number, number][] = [[0, pts.length - 1]];
-  while (stack.length) {
-    const [a, b] = stack.pop()!;
-    let worst = -1;
-    let worstD = toleranceM;
-    for (let i = a + 1; i < b; i++) {
-      const d = segmentDistance(xy[i], xy[a], xy[b]);
-      if (d > worstD) {
-        worst = i;
-        worstD = d;
-      }
-    }
-    if (worst >= 0) {
-      keep[worst] = true;
-      stack.push([a, worst], [worst, b]);
-    }
-  }
+  const keep = keepIndices(pts.map((p) => project(p, pts[0])), toleranceM);
   return pts.filter((_, i) => keep[i]);
-}
-
-function segmentDistance(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
 const round = (n: number) => Number(n.toFixed(6));

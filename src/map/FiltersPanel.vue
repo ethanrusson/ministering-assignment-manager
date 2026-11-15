@@ -6,6 +6,7 @@
 import { computed } from 'vue';
 import { XMarkIcon } from '@heroicons/vue/24/outline';
 import { useCompanionshipsStore } from '@/stores/companionships';
+import { useAuthStore } from '@/stores/auth';
 import { useDistrictsStore } from '@/stores/districts';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
@@ -27,15 +28,21 @@ const props = defineProps<{
   filters: MapFilters;
   colorBy: ColorBy;
   matchCount: number | null;
+  showAreas: boolean;
+  /** Districts whose area is in more than one piece. */
+  splitDistricts: string[];
 }>();
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'update:filters', v: MapFilters): void;
   (e: 'update:colorBy', v: ColorBy): void;
+  (e: 'update:showAreas', v: boolean): void;
+  (e: 'editBoundary'): void;
   (e: 'focusHousehold', id: string): void;
 }>();
 
 const households = useHouseholdsStore();
+const auth = useAuthStore();
 const elders = useEldersStore();
 const labels = useLabelsStore();
 const districts = useDistrictsStore();
@@ -221,7 +228,36 @@ const companionshipGaps = computed(() =>
       </section>
 
       <section v-if="districtRows.length">
-        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
+        <div class="mb-1.5 flex items-center gap-2">
+          <h3 class="text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
+          <button
+            v-if="auth.wardRole === 'admin'"
+            type="button"
+            class="ml-auto rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
+            @click="emit('editBoundary')"
+          >
+            Edit boundary
+          </button>
+          <button
+            type="button"
+            class="rounded-full border px-2.5 py-0.5 text-xs"
+            :class="[
+              showAreas ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50',
+              auth.wardRole === 'admin' ? '' : 'ml-auto',
+            ]"
+            :aria-pressed="showAreas"
+            @click="emit('update:showAreas', !showAreas)"
+          >
+            District areas
+          </button>
+        </div>
+        <p
+          v-for="name in showAreas ? splitDistricts : []"
+          :key="name"
+          class="mb-1 rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-800"
+        >
+          {{ name }} is in more than one piece.
+        </p>
         <table class="w-full text-xs">
           <thead class="text-stone-500">
             <tr>

@@ -18,10 +18,22 @@ import { useCompanionshipsStore } from '@/stores/companionships';
 import { useStreetsStore } from '@/stores/streets';
 import { useHomesStore } from '@/stores/homes';
 import { pushError, pushInfo } from '@/lib/errorToast';
+import type { Point as MapPoint } from './geo';
 import { applyAssignment, type Destination } from '@/lib/assignment';
 import { companionshipTitle, HOUSEHOLD_LIMIT } from '@/lib/validation';
 import { ministersHub } from '@/lib/flags';
 import { reassignOptions } from './reassign';
+import {
+  fromBoundary,
+  insertCorner,
+  moveCorner,
+  OUTLINE_SIMPLIFY_M,
+  simplifyRing,
+  snapCorner,
+  toBoundary,
+} from './boundary';
+import { districtAreas, NO_DISTRICT } from './districtAreas';
+import type { MultiPolygon } from 'polygon-clipping';
 import { usePanZoom, ZOOM_STEP } from '@/canvas/usePanZoom';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
 import {
@@ -30,6 +42,7 @@ import {
   groupByPoint,
   project,
   projectionOrigin,
+  outlineAround,
   scaleBar,
   unproject,
   wardBounds,
@@ -649,10 +662,145 @@ const streetLabels = computed(() =>
   ),
 );
 
+// ─── District areas (Phase 6 preview) ──────────────────────────────────────
+
+const showAreas = ref(false);
+/** How far the generated ward outline sits outside the outermost homes, in meters. */
+const OUTLINE_MARGIN_M = 100;
+
+/** The starting outline before a boundary is saved. */
+const generatedOutline = computed(() => outlineAround(groups.value.map((g) => g.p), OUTLINE_MARGIN_M));
+const savedOutline = computed(() =>
+  auth.wardBoundary ? fromBoundary(auth.wardBoundary, origin.value) : null,
+);
+/** The boundary being edited, else the saved one, else the generated one. */
+const wardOutline = computed(() => boundaryDraft.value ?? savedOutline.value ?? generatedOutline.value);
+
+// ─── Ward boundary editing (Phase 6, D7) ───────────────────────────────────
+
+/** Screen distance within which a dragged corner snaps to a corner or street. */
+const SNAP_PX = 12;
+const boundaryDraft = ref<MapPoint[] | null>(null);
+const editingBoundary = computed(() => boundaryDraft.value !== null);
+let dragCorner: { i: number; snap: ReturnType<typeof snapCorner> } | null = null;
+
+function startBoundaryEdit() {
+  boundaryDraft.value =
+    savedOutline.value ?? simplifyRing(generatedOutline.value, OUTLINE_SIMPLIFY_M);
+  selectedId.value = null;
+  filtersOpen.value = false;
+  locationsOpen.value = false;
+  editingHomes.value = false;
+  placing.value = null;
+}
+
+function resetBoundary() {
+  boundaryDraft.value = simplifyRing(generatedOutline.value, OUTLINE_SIMPLIFY_M);
+}
+
+async function saveBoundary() {
+  if (!boundaryDraft.value) return;
+  try {
+    await auth.updateWardBoundary(toBoundary(boundaryDraft.value, origin.value));
+    boundaryDraft.value = null;
+    pushInfo('Ward boundary saved.');
+  } catch (err) {
+    pushError(err);
+  }
+}
+
+function worldAt(e: MouseEvent): MapPoint {
+  const s = local(e);
+  return { x: (s.x - vp.tx) / vp.scale, y: (s.y - vp.ty) / vp.scale };
+}
+
+function onCornerDown(i: number, e: PointerEvent) {
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  dragCorner = { i, snap: { at: boundaryDraft.value![i], onCorner: null } };
+}
+
+function onCornerMove(i: number, e: PointerEvent) {
+  const ring = boundaryDraft.value;
+  if (!ring || dragCorner?.i !== i) return;
+  const others = ring.filter((_, k) => k !== i);
+  const snap = snapCorner(worldAt(e), others, streetsWorld.value.map((st) => st.pts), SNAP_PX / vp.scale);
+  // onCorner indexes `others`; map it back to the ring.
+  const onCorner = snap.onCorner === null ? null : snap.onCorner < i ? snap.onCorner : snap.onCorner + 1;
+  dragCorner = { i, snap: { at: snap.at, onCorner } };
+  boundaryDraft.value = ring.map((p, k) => (k === i ? snap.at : p));
+}
+
+function onCornerUp(i: number) {
+  const ring = boundaryDraft.value;
+  if (!ring || dragCorner?.i !== i) return;
+  boundaryDraft.value = moveCorner(ring, i, dragCorner.snap.at, dragCorner.snap.onCorner);
+  dragCorner = null;
+}
+
+const cornerHandles = computed(() =>
+  (boundaryDraft.value ?? []).map((p, i, ring) => {
+    const q = ring[(i + 1) % ring.length];
+    return {
+      x: p.x * vp.scale,
+      y: p.y * vp.scale,
+      midX: ((p.x + q.x) / 2) * vp.scale,
+      midY: ((p.y + q.y) / 2) * vp.scale,
+    };
+  }),
+);
+
+/** Until households have their own district (Phase 6), each takes its companionship's. */
+function districtIdOf(householdId: string): string {
+  const compId = companionships.companionshipForHousehold.get(householdId);
+  return (compId && companionships.byId.get(compId)?.district_id) || NO_DISTRICT;
+}
+
+const areas = computed(() =>
+  showAreas.value
+    ? districtAreas(
+        wardOutline.value,
+        streetsWorld.value.map((s) => s.pts),
+        groups.value.flatMap((g) => g.items.map((n) => ({ p: g.p, district: districtIdOf(n.id) }))),
+      )
+    : [],
+);
+
+function shapePath(shape: MultiPolygon, k: number): string {
+  return shape
+    .flatMap((poly) =>
+      poly.map(
+        (ring) => ring.map(([x, y], i) => `${i ? 'L' : 'M'}${(x * k).toFixed(1)} ${(y * k).toFixed(1)}`).join('') + 'Z',
+      ),
+    )
+    .join('');
+}
+
+const areaPaths = computed(() =>
+  areas.value.map((a) => {
+    const rank = districts.items.findIndex((d) => d.id === a.district);
+    return { key: a.district || 'none', family: districtFamily(rank), d: shapePath(a.shape, vp.scale) };
+  }),
+);
+
+const outlinePath = computed(
+  () =>
+    wardOutline.value.map((p, i) => `${i ? 'L' : 'M'}${(p.x * vp.scale).toFixed(1)} ${(p.y * vp.scale).toFixed(1)}`).join('') +
+    'Z',
+);
+
+const splitDistricts = computed(() =>
+  areas.value
+    .filter((a) => a.split && a.district)
+    .map((a) => {
+      const rank = districts.items.findIndex((d) => d.id === a.district);
+      return `${districtLabel(rank)} · ${districts.items[rank]?.name ?? ''}`;
+    }),
+);
+
 const bar = computed(() => scaleBar(vp.scale));
 
 function fit() {
-  const b = wardBounds(groups.value.map((g) => g.p));
+  const b = wardBounds(savedOutline.value ?? groups.value.map((g) => g.p));
   if (!b || !size.value.w) return;
   fitTo(b, { width: size.value.w, height: size.value.h }, 80);
 }
@@ -667,6 +815,7 @@ function zoomBy(factor: number) {
  * drawn on top of each other when zoomed out).
  */
 function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) {
+  if (editingBoundary.value) return;
   if (placing.value?.kind === 'household') return void placeHouseholdAt(e);
   const p = local(e);
   const x = p.x - vp.tx;
@@ -778,7 +927,7 @@ function onBackgroundClick(e: MouseEvent) {
   const inside = e
     .composedPath()
     .some((el) => el instanceof HTMLElement && (el.hasAttribute('data-household') || el.hasAttribute('data-no-pan')));
-  if (inside) return;
+  if (inside || editingBoundary.value) return;
   if (placing.value?.kind === 'household') void placeHouseholdAt(e);
   else if (placing.value) return;
   else if (editingHomes.value) void editHomeAt(e);
@@ -796,7 +945,8 @@ function onWheel(e: WheelEvent) {
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
-  if (placing.value) placing.value = null;
+  if (editingBoundary.value) boundaryDraft.value = null;
+  else if (placing.value) placing.value = null;
   else selectedId.value = null;
 }
 
@@ -853,6 +1003,23 @@ onBeforeUnmount(() => {
         height="1"
         aria-hidden="true"
       >
+        <g v-if="showAreas" stroke-width="1.5" stroke-linejoin="round" fill-rule="evenodd">
+          <path
+            v-for="a in areaPaths"
+            :key="a.key"
+            :d="a.d"
+            :style="{ fill: v(a.family ? `${a.family}-100` : 'white'), stroke: v('stone-500') }"
+          />
+        </g>
+        <path
+          v-if="showAreas || savedOutline || editingBoundary"
+          :d="outlinePath"
+          fill="none"
+          stroke-linejoin="round"
+          :stroke-dasharray="editingBoundary ? undefined : '6 4'"
+          :stroke-width="editingBoundary ? 2.5 : 1.5"
+          :style="{ stroke: v(editingBoundary ? 'blue-600' : 'stone-600') }"
+        />
         <g fill="none" stroke-linecap="round" stroke-linejoin="round">
           <path :d="streetPaths.lane" :style="{ stroke: v('stone-200') }" stroke-width="2" stroke-dasharray="2 4" />
           <path :d="streetPaths.residential" :style="{ stroke: v('stone-200') }" stroke-width="5" />
@@ -955,6 +1122,33 @@ onBeforeUnmount(() => {
           {{ g.label.long ? g.front.long : g.front.short }}
         </span>
       </button>
+
+      <template v-if="editingBoundary">
+        <button
+          v-for="(h, i) in cornerHandles"
+          :key="'mid' + i"
+          type="button"
+          data-no-pan
+          class="absolute z-10 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-blue-600 bg-white text-xs leading-none text-blue-700"
+          :style="{ left: `${h.midX}px`, top: `${h.midY}px` }"
+          aria-label="Add a corner here"
+          @click="boundaryDraft = insertCorner(boundaryDraft!, i)"
+        >
+          +
+        </button>
+        <span
+          v-for="(h, i) in cornerHandles"
+          :key="'corner' + i"
+          data-no-pan
+          class="absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-white bg-blue-600 shadow"
+          style="touch-action: none"
+          :style="{ left: `${h.x}px`, top: `${h.y}px` }"
+          @pointerdown="onCornerDown(i, $event)"
+          @pointermove="onCornerMove(i, $event)"
+          @pointerup="onCornerUp(i)"
+          @pointercancel="onCornerUp(i)"
+        />
+      </template>
 
       <div
         v-if="popover"
@@ -1154,6 +1348,19 @@ onBeforeUnmount(() => {
     </button>
 
     <div
+      v-if="editingBoundary"
+      data-no-pan
+      class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-stone-900/90 px-3 py-2 text-xs text-stone-50 shadow-lg"
+    >
+      <span class="font-semibold">Ward boundary</span>
+      <button type="button" class="underline" @click="resetBoundary">Reset</button>
+      <button type="button" class="underline" @click="boundaryDraft = null">Cancel</button>
+      <button type="button" class="rounded bg-blue-600 px-2 py-0.5 font-semibold" @click="saveBoundary">
+        Save
+      </button>
+    </div>
+
+    <div
       v-if="placing"
       data-no-pan
       class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-stone-900/90 px-3 py-2 text-xs text-stone-50 shadow-lg"
@@ -1168,10 +1375,13 @@ onBeforeUnmount(() => {
       v-if="filtersOpen"
       v-model:filters="filters"
       v-model:color-by="colorBy"
+      v-model:show-areas="showAreas"
+      :split-districts="splitDistricts"
       :flags="flags"
       :match-count="matched ? matched.size : null"
       @close="filtersOpen = false"
       @focus-household="focusForReassign"
+      @edit-boundary="startBoundaryEdit"
     />
 
     <LocationsPanel

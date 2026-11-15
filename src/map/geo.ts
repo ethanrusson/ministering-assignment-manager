@@ -36,6 +36,42 @@ export function unproject(p: Point, origin: LatLng): LatLng {
   };
 }
 
+/**
+ * Douglas–Peucker: which points of a line to keep so it strays from the
+ * original by at most `tolerance`. Endpoints always survive.
+ */
+export function keepIndices(pts: Point[], tolerance: number): boolean[] {
+  const keep = new Array<boolean>(pts.length).fill(false);
+  if (!pts.length) return keep;
+  keep[0] = keep[pts.length - 1] = true;
+  const stack: [number, number][] = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    let worst = -1;
+    let worstD = tolerance;
+    for (let i = a + 1; i < b; i++) {
+      const d = distance(pts[i], closestOnSegment(pts[i], pts[a], pts[b]));
+      if (d > worstD) {
+        worst = i;
+        worstD = d;
+      }
+    }
+    if (worst >= 0) {
+      keep[worst] = true;
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  return keep;
+}
+
+export function closestOnSegment(p: Point, a: Point, b: Point): Point {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 /** Straight-line distance in meters between two projected points (D10). */
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -70,6 +106,39 @@ export interface Bounds {
   y: number;
   w: number;
   h: number;
+}
+
+/**
+ * A starting ward outline before one is drawn (docs/ward-map-prd.md, Phase 6):
+ * the convex hull around the households, `marginM` out, leaving out lone pins.
+ */
+export function outlineAround(points: Point[], marginM: number): Point[] {
+  const grouped = points.filter((p) => points.some((q) => q !== p && distance(p, q) <= ISOLATED_M));
+  const pts = (grouped.length ? grouped : points).flatMap((p) =>
+    Array.from({ length: 8 }, (_, i) => ({
+      x: p.x + marginM * Math.cos((i * Math.PI) / 4),
+      y: p.y + marginM * Math.sin((i * Math.PI) / 4),
+    })),
+  );
+  return convexHull(pts);
+}
+
+/** Andrew's monotone chain. */
+function convexHull(pts: Point[]): Point[] {
+  const s = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (s.length < 3) return s;
+  const cross = (o: Point, a: Point, b: Point) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Point[] = [];
+  for (const p of s) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: Point[] = [];
+  for (const p of [...s].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
 /** A household with no other household this close is left out of "fit to ward". */

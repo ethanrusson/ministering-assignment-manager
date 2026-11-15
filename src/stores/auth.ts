@@ -2,6 +2,20 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import type { Json } from '@/types/database';
+
+/** The ward boundary (wards.boundary): a GeoJSON Polygon, [lng, lat] pairs, closed. */
+export interface WardBoundary {
+  type: 'Polygon';
+  coordinates: [number, number][][];
+}
+
+function asBoundary(v: Json | null | undefined): WardBoundary | null {
+  const b = v as Partial<WardBoundary> | null;
+  return b?.type === 'Polygon' && Array.isArray(b.coordinates?.[0]) && b.coordinates[0].length >= 4
+    ? (b as WardBoundary)
+    : null;
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
@@ -9,6 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
   const wardId = ref<string | null>(null);
   const wardRole = ref<'admin' | 'member' | null>(null);
   const wardName = ref<string | null>(null);
+  const wardBoundary = ref<WardBoundary | null>(null);
   const ready = ref(false);
 
   async function init() {
@@ -36,6 +51,7 @@ export const useAuthStore = defineStore('auth', () => {
         wardId.value = null;
         wardRole.value = null;
         wardName.value = null;
+        wardBoundary.value = null;
       }
     });
   }
@@ -53,12 +69,14 @@ export const useAuthStore = defineStore('auth', () => {
     if (membership?.ward_id) {
       const { data: ward } = await supabase
         .from('wards')
-        .select('name')
+        .select('name, boundary')
         .eq('id', membership.ward_id)
         .single();
       wardName.value = ward?.name ?? null;
+      wardBoundary.value = asBoundary(ward?.boundary);
     } else {
       wardName.value = null;
+      wardBoundary.value = null;
     }
   }
 
@@ -71,6 +89,17 @@ export const useAuthStore = defineStore('auth', () => {
       .eq('id', wardId.value);
     if (error) throw error;
     wardName.value = trimmed;
+  }
+
+  /** Admins only (wards update policy). Null clears it back to the generated outline. */
+  async function updateWardBoundary(boundary: WardBoundary | null) {
+    if (!wardId.value) return;
+    const { error } = await supabase
+      .from('wards')
+      .update({ boundary: boundary as unknown as Json })
+      .eq('id', wardId.value);
+    if (error) throw error;
+    wardBoundary.value = boundary;
   }
 
   async function signIn(email: string, password: string) {
@@ -87,5 +116,19 @@ export const useAuthStore = defineStore('auth', () => {
     await supabase.auth.signOut();
   }
 
-  return { user, session, wardId, wardRole, wardName, ready, init, signIn, signUp, signOut, updateWardName };
+  return {
+    user,
+    session,
+    wardId,
+    wardRole,
+    wardName,
+    wardBoundary,
+    ready,
+    init,
+    signIn,
+    signUp,
+    signOut,
+    updateWardName,
+    updateWardBoundary,
+  };
 });

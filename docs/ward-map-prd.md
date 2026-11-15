@@ -361,6 +361,8 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
 
 **Geometry library.** Start the phase with a short spike comparing JSTS (noding plus polygonize) against a lighter mix (polygon-clipping plus custom splitting). Criteria: correctness on the real street network, bundle size, and speed. Recompute target: under 100 ms on each edit for about 200 households. Record the result here.
 
+*Spike result:* the lighter mix. `polygon-clipping` (0.15.7, about 10 KB minified and gzipped; JSTS is roughly 250 KB) merges each district's pieces, and a small custom planar graph (`src/map/blocks.ts`: noding, joining street ends within 3 m, pruning dead ends, face tracing) splits the ward into blocks. Fixture-ward unit tests cover blocks, assignment, mixed-block division, full coverage without overlaps, and split detection. On the real ward (99 streets, 178 households, generated outline) turning the areas on takes about 32 ms from click to painted frame.
+
 **Acceptance**
 - Every point inside the ward belongs to exactly one district area: no gaps, no overlaps. Covered by unit tests on a fixture ward.
 - A household change redraws the area live.

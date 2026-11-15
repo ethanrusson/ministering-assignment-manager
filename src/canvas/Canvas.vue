@@ -342,7 +342,7 @@ defineExpose({ fitToContent, reset, zoomIn, zoomOut, zoomToBbox, viewport });
 <template>
   <div
     ref="root"
-    class="relative h-full w-full select-none overflow-hidden bg-stone-100"
+    class="relative h-full w-full select-none overflow-clip bg-stone-100"
     style="touch-action: none"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"

@@ -29,6 +29,13 @@ export function project(p: LatLng, origin: LatLng): Point {
   };
 }
 
+export function unproject(p: Point, origin: LatLng): LatLng {
+  return {
+    lat: origin.lat - p.y / M_PER_DEG_LAT,
+    lng: origin.lng + p.x / (Math.cos((origin.lat * Math.PI) / 180) * M_PER_DEG_LNG_AT_EQUATOR),
+  };
+}
+
 /** Straight-line distance in meters between two projected points (D10). */
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -65,17 +72,21 @@ export interface Bounds {
   h: number;
 }
 
+/** A household with no other household this close is left out of "fit to ward". */
+const ISOLATED_M = 1000;
+
 /**
  * Bounding box for "fit to ward". Before a ward boundary exists this is the
- * households, leaving out pins far beyond the rest (an outlier would otherwise
- * shrink the whole ward to a dot).
+ * households, leaving out lone pins far from any other (one would otherwise
+ * stretch the frame and leave most of the screen empty). A strung-out group of
+ * homes stays in, since each has a neighbour nearby.
  */
 export function wardBounds(points: Point[], minSize = 200): Bounds | null {
   if (!points.length) return null;
-  const c = { x: median(points.map((p) => p.x)), y: median(points.map((p) => p.y)) };
-  const d = points.map((p) => distance(p, c)).sort((a, b) => a - b);
-  const reach = Math.max(minSize, 3 * d[Math.floor((d.length - 1) * 0.9)]);
-  const kept = points.filter((p) => distance(p, c) <= reach);
+  const grouped = points.filter((p) =>
+    points.some((q) => q !== p && distance(p, q) <= ISOLATED_M),
+  );
+  const kept = grouped.length ? grouped : points;
   const xs = kept.map((p) => p.x);
   const ys = kept.map((p) => p.y);
   const x0 = Math.min(...xs);
@@ -83,6 +94,30 @@ export function wardBounds(points: Point[], minSize = 200): Bounds | null {
   const w = Math.max(minSize, Math.max(...xs) - x0);
   const h = Math.max(minSize, Math.max(...ys) - y0);
   return { x: (x0 + Math.max(...xs)) / 2 - w / 2, y: (y0 + Math.max(...ys)) / 2 - h / 2, w, h };
+}
+
+export interface BBox {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+/** A projected box, grown by `marginM` on every side, as lat/lng bounds. */
+export function toBBox(b: Bounds, origin: LatLng, marginM: number): BBox {
+  const sw = unproject({ x: b.x - marginM, y: b.y + b.h + marginM }, origin);
+  const ne = unproject({ x: b.x + b.w + marginM, y: b.y - marginM }, origin);
+  return { south: sw.lat, west: sw.lng, north: ne.lat, east: ne.lng };
+}
+
+/** Ground added around the households when downloading map data for them. */
+export const MAP_AREA_MARGIN_M = 250;
+
+/** The households' area (outliers left out, see wardBounds) as lat/lng bounds. */
+export function householdArea(points: LatLng[], marginM: number): BBox | null {
+  const origin = projectionOrigin(points);
+  const b = wardBounds(points.map((p) => project(p, origin)));
+  return b ? toBBox(b, origin, marginM) : null;
 }
 
 const SCALE_STEPS_MI = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 25];

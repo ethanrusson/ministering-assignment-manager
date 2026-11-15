@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Ward map (docs/ward-map-prd.md, Phase 1): households at their LCR locations,
-// names always shown, tap one for its ministering connections. Read-only.
+// tap one for its ministering connections. Read-only.
 //
 // World units are meters (see geo.ts). Squares and labels keep a constant
-// on-screen size, so the world layer only translates; positions are scaled by
-// hand and spread apart for display when they collide (nudge.ts).
+// on-screen size, so the world layer only translates and positions are scaled
+// by hand. Marks never move to avoid each other: names that don't fit are
+// left out instead (labels.ts).
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { XMarkIcon } from '@heroicons/vue/24/outline';
@@ -14,6 +15,9 @@ import { useHouseholdsStore } from '@/stores/households';
 import { useLabelsStore } from '@/stores/labels';
 import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
+import { useStreetsStore } from '@/stores/streets';
+import { useHomesStore } from '@/stores/homes';
+import { pushError } from '@/lib/errorToast';
 import { usePanZoom, ZOOM_STEP } from '@/canvas/usePanZoom';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
 import {
@@ -23,9 +27,11 @@ import {
   project,
   projectionOrigin,
   scaleBar,
+  unproject,
   wardBounds,
   type Point,
 } from './geo';
+import { homesToDraw } from './homes';
 import {
   allConnections,
   buildConnections,
@@ -33,17 +39,17 @@ import {
   type Line,
   type MinisteringModel,
 } from './connections';
-import { nudge } from './nudge';
+import { placeStreetLabels } from './streets';
+import { fitLabels, LABEL_OFFSET } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
 
 /** Zoom limits in screen px per meter: about 200 km across down to 100 m. */
 const MIN_SCALE = 0.005;
 const MAX_SCALE = 8;
 const SQUARE = 22;
-const GROUP_SQUARE = 14;
+/** How far each household sharing a point peeks out behind the front one, in px. */
+const STACK_OFFSET = 4;
 const POPOVER_W = 290;
-/** Farthest a mark is pushed from its home to clear a neighbour, in screen px. */
-const MAX_NUDGE = 48;
 
 const auth = useAuthStore();
 const elders = useEldersStore();
@@ -51,6 +57,8 @@ const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
+const streets = useStreetsStore();
+const homes = useHomesStore();
 
 const root = ref<HTMLDivElement | null>(null);
 const size = ref({ w: 0, h: 0 });
@@ -106,18 +114,22 @@ function markFor(householdId: string): Mark {
   };
 }
 
-/** Map label: "Surname, Given & Given" → "Surname, G." */
-function shortName(name: string): string {
+/** Map labels for "Surname, Given & Given": "Surname", and "Surname, G." when there's room. */
+function labelNames(name: string): { short: string; long: string } {
   const [surname, given] = name.split(',').map((s) => s.trim());
-  const initial = given?.[0];
-  return initial ? `${surname}, ${initial}.` : surname || name;
+  const short = surname || name;
+  return { short, long: given?.[0] ? `${short}, ${given[0]}.` : short };
 }
 
+const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const LABEL_FONT = `600 11px ${FONT}`;
+const STREET_FONT = `400 10px ${FONT}`;
+
 let measureCtx: CanvasRenderingContext2D | null | undefined;
-function textWidth(s: string): number {
+function textWidth(s: string, font = LABEL_FONT): number {
   if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d');
   if (!measureCtx) return s.length * 6.2;
-  measureCtx.font = "600 11px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  measureCtx.font = font;
   return measureCtx.measureText(s).width;
 }
 
@@ -125,34 +137,29 @@ interface Node {
   id: string;
   name: string;
   short: string;
+  long: string;
   lat: number;
   lng: number;
   mark: Mark;
 }
 
-/** Households grouped by identical point, with their box size for nudging. */
+/** Households grouped by identical point (usually one family's home). */
 const groups = computed(() =>
   groupByPoint<Node>(
     located.value.map((h) => ({
       id: h.id,
       name: h.name,
-      short: shortName(h.name),
+      ...labelNames(h.name),
       lat: h.lat!,
       lng: h.lng!,
       mark: markFor(h.id),
     })),
-  ).map((g) => {
-    const p = project(g, origin.value);
-    if (g.items.length === 1) {
-      const w = Math.max(SQUARE + 4, textWidth(g.items[0].short) + 8);
-      return { ...g, p, multi: false, box: { left: -w / 2, top: -13, w, h: 44 } };
-    }
-    const colW = GROUP_SQUARE + 5 + Math.max(...g.items.map((n) => textWidth(n.short))) + 8;
-    const rows = Math.ceil(g.items.length / 2);
-    const w = 2 * colW + 16;
-    const h = 16 + rows * 20;
-    return { ...g, p, multi: true, box: { left: -w / 2, top: -h / 2, w, h } };
-  }),
+  ).map((g) => ({
+    ...g,
+    p: project(g, origin.value),
+    shortW: Math.max(...g.items.map((n) => textWidth(n.short))) + 8,
+    longW: Math.max(...g.items.map((n) => textWidth(n.long))) + 8,
+  })),
 );
 
 const groupOf = computed(() => {
@@ -161,24 +168,9 @@ const groupOf = computed(() => {
   return m;
 });
 
-// Nudge at quarter-octave zoom steps, so a pinch doesn't re-run it every frame.
-const nudgeScale = computed(() => 2 ** (Math.round(Math.log2(vp.scale) * 4) / 4));
-const offsets = computed(() =>
-  nudge(
-    groups.value.map((g) => ({
-      id: g.key,
-      x: g.p.x * nudgeScale.value,
-      y: g.p.y * nudgeScale.value,
-      ...g.box,
-    })),
-    { maxShift: MAX_NUDGE },
-  ),
-);
-
 /** Where a group is drawn, in world-layer pixels. */
 function placeOf(g: (typeof groups.value)[number]): Point {
-  const o = offsets.value.get(g.key) ?? { dx: 0, dy: 0 };
-  return { x: g.p.x * vp.scale + o.dx, y: g.p.y * vp.scale + o.dy };
+  return { x: g.p.x * vp.scale, y: g.p.y * vp.scale };
 }
 
 // ─── Selection and lines ───────────────────────────────────────────────────
@@ -191,12 +183,41 @@ const conn = computed(() =>
 );
 const faded = (id: string) => !!conn.value && !conn.value.focus.has(id);
 
+/** Each group's label, if it fits: the selected household first, then its connections. */
+const labelsShown = computed(() => {
+  const rank = (g: (typeof groups.value)[number]) =>
+    g.items.some((n) => n.id === selectedId.value) ? 0 : g.items.some((n) => conn.value?.focus.has(n.id)) ? 1 : 2;
+  return fitLabels(
+    [...groups.value]
+      .sort((a, b) => rank(a) - rank(b))
+      .map((g) => ({
+        id: g.key,
+        ...placeOf(g),
+        shortW: g.shortW,
+        longW: g.longW,
+        force: rank(g) === 0,
+      })),
+  );
+});
+
 const placed = computed(() =>
   groups.value.map((g) => {
     const at = placeOf(g);
-    const sel = g.items.some((n) => n.id === selectedId.value);
+    // The selected household comes to the front of its stack; otherwise the first.
+    const front = g.items.find((n) => n.id === selectedId.value) ?? g.items[0];
+    const sel = front.id === selectedId.value;
     const focus = g.items.some((n) => !faded(n.id));
-    return { ...g, x: at.x, y: at.y, sel, faded: !focus, z: sel ? 3 : conn.value && focus ? 2 : 1 };
+    return {
+      ...g,
+      x: at.x,
+      y: at.y,
+      front,
+      behind: g.items.filter((n) => n !== front),
+      sel,
+      faded: !focus,
+      label: labelsShown.value.get(g.key) ?? null,
+      z: sel ? 3 : conn.value && focus ? 2 : 1,
+    };
   }),
 );
 
@@ -283,7 +304,7 @@ const popover = computed(() => {
   const at = placeOf(g);
   const screenX = at.x + vp.tx;
   const screenY = at.y + vp.ty;
-  const gap = g.multi ? g.box.w / 2 + 8 : 20;
+  const gap = 20;
   const left = screenX + gap + POPOVER_W > size.value.w;
   const above = screenY > size.value.h * 0.55;
 
@@ -319,16 +340,103 @@ function select(id: string) {
 
 // ─── Viewport ──────────────────────────────────────────────────────────────
 
+// ─── Non-member homes ──────────────────────────────────────────────────────
+
+const homesDrawn = computed(() =>
+  homesToDraw(
+    homes.items.map((h) => ({ id: h.id, p: project(h, origin.value) })),
+    groups.value.map((g) => g.p),
+  ),
+);
+
+/** In this mode a tap on empty map adds a home, and a tap on a home removes it. */
+const editingHomes = ref(false);
+
+function homeAt(at: Point): string | null {
+  const half = SQUARE / 2;
+  const hit = homesDrawn.value.find(
+    (h) => Math.abs(h.p.x * vp.scale - at.x) <= half && Math.abs(h.p.y * vp.scale - at.y) <= half,
+  );
+  return hit?.id ?? null;
+}
+
+async function editHomeAt(e: MouseEvent) {
+  const s = local(e);
+  const at = { x: s.x - vp.tx, y: s.y - vp.ty };
+  const hit = homeAt(at);
+  try {
+    if (hit) await homes.remove(hit);
+    else await homes.add(unproject({ x: at.x / vp.scale, y: at.y / vp.scale }, origin.value));
+  } catch (err) {
+    pushError(err);
+  }
+}
+
+// ─── Streets ───────────────────────────────────────────────────────────────
+
+/** Streets in world meters; reprojected only when streets or the origin change. */
+const streetsWorld = computed(() =>
+  streets.items.map((st) => ({
+    name: st.name,
+    kind: st.kind,
+    pts: st.geometry.coordinates.map(([lng, lat]) => project({ lat, lng }, origin.value)),
+  })),
+);
+
+const streetPaths = computed(() => {
+  const d = { main: '', residential: '', lane: '' };
+  const k = vp.scale;
+  for (const st of streetsWorld.value) {
+    d[st.kind] += st.pts
+      .map((p, i) => `${i ? 'L' : 'M'}${(p.x * k).toFixed(1)} ${(p.y * k).toFixed(1)}`)
+      .join('');
+  }
+  return d;
+});
+
+const streetLabels = computed(() =>
+  placeStreetLabels(
+    [...streetsWorld.value]
+      .sort((a, b) => (a.kind === 'main' ? 0 : 1) - (b.kind === 'main' ? 0 : 1))
+      .map((st) => ({
+        name: st.name,
+        pts: st.pts.map((p) => ({ x: p.x * vp.scale, y: p.y * vp.scale })),
+      })),
+    (name) => textWidth(name, STREET_FONT),
+  ),
+);
+
 const bar = computed(() => scaleBar(vp.scale));
 
 function fit() {
   const b = wardBounds(groups.value.map((g) => g.p));
   if (!b || !size.value.w) return;
-  fitTo(b, { width: size.value.w, height: size.value.h }, 60);
+  fitTo(b, { width: size.value.w, height: size.value.h }, 80);
 }
 
 function zoomBy(factor: number) {
   zoomAt(size.value.w / 2, size.value.h / 2, factor);
+}
+
+/**
+ * A tap selects the household under it; tapping the same spot again steps to
+ * the next household whose square is there too (a shared home, or neighbours
+ * drawn on top of each other when zoomed out).
+ */
+function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) {
+  const p = local(e);
+  const x = p.x - vp.tx;
+  const y = p.y - vp.ty;
+  const reach = SQUARE / 2 + 2;
+  const under = groups.value.filter((g) => {
+    const at = placeOf(g);
+    return Math.abs(at.x - x) <= reach && Math.abs(at.y - y) <= reach;
+  });
+  const ids = (under.some((g) => g.key === tapped.key) ? under : [tapped]).flatMap((g) =>
+    g.items.map((n) => n.id),
+  );
+  const i = ids.indexOf(selectedId.value ?? '');
+  select(i < 0 ? tapped.items[0].id : ids[(i + 1) % ids.length]);
 }
 
 /** Center a household and select it (search results). */
@@ -415,7 +523,8 @@ function onClickCapture(e: MouseEvent) {
 
 function onBackgroundClick(e: MouseEvent) {
   if ((e.target as HTMLElement).closest('[data-household], [data-no-pan]')) return;
-  selectedId.value = null;
+  if (editingHomes.value) editHomeAt(e);
+  else selectedId.value = null;
 }
 
 function onWheel(e: WheelEvent) {
@@ -464,7 +573,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="root"
-    class="relative h-full w-full select-none overflow-hidden bg-stone-100"
+    class="relative h-full w-full select-none overflow-clip bg-stone-100"
     style="touch-action: none"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -484,6 +593,37 @@ onBeforeUnmount(() => {
         height="1"
         aria-hidden="true"
       >
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path :d="streetPaths.lane" :style="{ stroke: v('stone-200') }" stroke-width="2" stroke-dasharray="2 4" />
+          <path :d="streetPaths.residential" :style="{ stroke: v('stone-200') }" stroke-width="5" />
+          <path :d="streetPaths.main" :style="{ stroke: v('stone-300') }" stroke-width="9" />
+        </g>
+        <g :style="{ fill: v(editingHomes ? 'stone-300' : 'stone-200') }">
+          <rect
+            v-for="h in homesDrawn"
+            :key="h.id"
+            :x="h.p.x * vp.scale - SQUARE / 2"
+            :y="h.p.y * vp.scale - SQUARE / 2"
+            :width="SQUARE"
+            :height="SQUARE"
+            rx="5"
+          />
+        </g>
+        <g
+          :style="{ font: STREET_FONT, fill: v('stone-500'), stroke: v('stone-100') }"
+          stroke-width="3"
+          paint-order="stroke"
+          text-anchor="middle"
+          dominant-baseline="central"
+        >
+          <text
+            v-for="(l, i) in streetLabels"
+            :key="i"
+            :transform="`translate(${l.x.toFixed(1)} ${l.y.toFixed(1)}) rotate(${l.angle.toFixed(1)})`"
+          >
+            {{ l.name }}
+          </text>
+        </g>
         <g fill="none" stroke-linecap="round">
           <path
             v-if="paths.all"
@@ -508,64 +648,42 @@ onBeforeUnmount(() => {
         </g>
       </svg>
 
-      <template v-for="g in placed" :key="g.key">
-        <button
-          v-if="!g.multi"
-          type="button"
-          data-household
-          class="absolute flex flex-col items-center gap-0.5 p-0.5"
-          :style="{
-            left: `${g.x}px`,
-            top: `${g.y}px`,
-            transform: 'translate(-50%, -13px)',
-            opacity: g.faded ? 0.4 : 1,
-            zIndex: g.z,
-          }"
-          :aria-label="`${g.items[0].name} household`"
-          @click.stop="select(g.items[0].id)"
+      <button
+        v-for="g in placed"
+        :key="g.key"
+        type="button"
+        data-household
+        class="absolute p-0.5"
+        :style="{
+          left: `${g.x}px`,
+          top: `${g.y}px`,
+          transform: 'translate(-50%, -50%)',
+          opacity: g.faded ? 0.4 : 1,
+          zIndex: g.z,
+        }"
+        :aria-label="g.items.map((n) => `${n.name} household`).join(', ')"
+        @click.stop="tapAt($event, g)"
+      >
+        <span class="relative block">
+          <HouseholdMark
+            v-for="(n, i) in g.behind.slice(0, 2)"
+            :key="n.id"
+            :mark="n.mark"
+            :size="SQUARE"
+            class="!absolute left-0 top-0"
+            :style="{ transform: `translate(${(i + 1) * STACK_OFFSET}px, ${-(i + 1) * STACK_OFFSET}px)`, zIndex: -1 - i }"
+          />
+          <HouseholdMark :mark="g.front.mark" :size="SQUARE" :selected="g.sel" />
+        </span>
+        <span
+          v-if="g.label"
+          class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-white/90 px-1 text-[11px] leading-[1.15] text-stone-900"
+          :class="g.sel || (conn && !g.faded) ? 'font-semibold' : 'font-medium'"
+          :style="g.label.above ? { bottom: `calc(50% + ${LABEL_OFFSET}px)` } : { top: `calc(50% + ${LABEL_OFFSET}px)` }"
         >
-          <HouseholdMark :mark="g.items[0].mark" :size="SQUARE" :selected="g.sel" />
-          <span
-            class="whitespace-nowrap rounded bg-white/90 px-1 text-[11px] leading-[1.15] text-stone-900"
-            :class="g.sel || (conn && !g.faded) ? 'font-semibold' : 'font-medium'"
-          >
-            {{ g.items[0].short }}
-          </span>
-        </button>
-        <div
-          v-else
-          data-household
-          class="absolute w-max rounded-lg border-[1.5px] border-stone-400 bg-white p-1.5 shadow"
-          :style="{
-            left: `${g.x}px`,
-            top: `${g.y}px`,
-            transform: 'translate(-50%, -50%)',
-            opacity: g.faded ? 0.4 : 1,
-            zIndex: g.z,
-          }"
-        >
-          <div class="grid grid-cols-[auto_auto] gap-x-1 gap-y-0.5">
-            <button
-              v-for="n in g.items"
-              :key="n.id"
-              type="button"
-              class="flex items-center gap-[5px] rounded py-0.5 pl-0.5 pr-1"
-              :class="n.id === selectedId ? 'bg-stone-200' : ''"
-              :style="{ opacity: faded(n.id) && g.items.some((m) => !faded(m.id)) ? 0.4 : 1 }"
-              :aria-label="`${n.name} household`"
-              @click.stop="select(n.id)"
-            >
-              <HouseholdMark :mark="n.mark" :size="GROUP_SQUARE" />
-              <span
-                class="whitespace-nowrap text-[11px] text-stone-900"
-                :class="n.id === selectedId ? 'font-semibold' : 'font-medium'"
-              >
-                {{ n.short }}
-              </span>
-            </button>
-          </div>
-        </div>
-      </template>
+          {{ g.label.long ? g.front.long : g.front.short }}
+        </span>
+      </button>
 
       <div
         v-if="popover"
@@ -699,6 +817,14 @@ onBeforeUnmount(() => {
         @click="showAll = !showAll"
       >
         All connections
+      </button>
+      <button
+        class="h-10 rounded-full px-3 text-xs transition-colors"
+        :class="editingHomes ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
+        :aria-pressed="editingHomes"
+        @click="editingHomes = !editingHomes"
+      >
+        Edit houses
       </button>
     </div>
   </div>

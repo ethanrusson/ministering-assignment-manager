@@ -25,6 +25,7 @@ export type LocationReviewKind = 'no_location' | 'outside_ward' | 'moved' | 'sha
 export type LocationReviewStatus = 'open' | 'resolved' | 'dismissed';
 export type StreetKind = 'main' | 'residential' | 'lane';
 export type StreetSource = 'osm' | 'manual';
+export type HomeSource = 'footprint' | 'manual';
 
 export type Database = {
   __InternalSupabase: { PostgrestVersion: '12' };
@@ -351,6 +352,33 @@ export type Database = {
           created_at?: string;
           resolved_at?: string | null;
           resolved_by?: string | null;
+        };
+        Relationships: EmptyRel;
+      };
+      homes: {
+        Row: {
+          id: string;
+          ward_id: string;
+          lat: number;
+          lng: number;
+          source: HomeSource;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          ward_id: string;
+          lat: number;
+          lng: number;
+          source: HomeSource;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          ward_id?: string;
+          lat?: number;
+          lng?: number;
+          source?: HomeSource;
+          created_at?: string;
         };
         Relationships: EmptyRel;
       };

@@ -6,10 +6,14 @@ import { useHouseholdsStore } from '@/stores/households';
 import { useLabelsStore } from '@/stores/labels';
 import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
+import { useStreetsStore } from '@/stores/streets';
+import { useHomesStore } from '@/stores/homes';
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue';
 import LabelsModal from '@/components/LabelsModal.vue';
 import ImportModal from '@/components/ImportModal.vue';
 import LocationImportModal from '@/components/LocationImportModal.vue';
+import StreetImportModal from '@/components/StreetImportModal.vue';
+import HomeImportModal from '@/components/HomeImportModal.vue';
 import WardInviteModal from '@/components/WardInviteModal.vue';
 import Canvas from '@/canvas/Canvas.vue';
 import District from '@/canvas/District.vue';
@@ -42,6 +46,8 @@ import {
   MoonIcon,
   SunIcon,
   MapPinIcon,
+  MapIcon,
+  HomeModernIcon,
 } from '@heroicons/vue/24/outline';
 import { DISTRICT_WIDTH, DISTRICT_INNER_PAD_X, CARD_W, COL_GAP, SORT_KEY_GAP } from '@/canvas/layout';
 import CardContextMenu, { type MenuItem } from '@/canvas/CardContextMenu.vue';
@@ -58,6 +64,8 @@ const households = useHouseholdsStore();
 const labels = useLabelsStore();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
+const streets = useStreetsStore();
+const homes = useHomesStore();
 
 const snap = useSnapshot();
 const { count: changeCount } = useChangeList();
@@ -70,12 +78,16 @@ useConnectionWatcher([
   () => labels.fetch(),
   () => districts.fetch(),
   () => companionships.fetch(),
+  () => streets.fetch(),
+  () => homes.fetch(),
   () => (auth.wardId ? snap.loadSnapshot(auth.wardId) : Promise.resolve()),
 ]);
 
 const labelsOpen = ref(false);
 const importOpen = ref(false);
 const locationImportOpen = ref(false);
+const streetImportOpen = ref(false);
+const homeImportOpen = ref(false);
 const inviteOpen = ref(false);
 const changesOpen = ref(false);
 const loading = ref(true);
@@ -140,6 +152,8 @@ async function onBackupFileChosen(e: Event) {
       labels.fetch(),
       districts.fetch(),
       companionships.fetch(),
+      streets.fetch(),
+      homes.fetch(),
       snap.loadSnapshot(auth.wardId),
     ]);
   } catch (e) {
@@ -321,6 +335,8 @@ const settingsMenuItems = computed<MenuItem[]>(() => {
     { label: 'Manage Labels', icon: TagIcon, onClick: () => { labelsOpen.value = true; } },
     { label: 'Import LCR HTML', icon: ArrowDownTrayIcon, onClick: () => { importOpen.value = true; } },
     { label: 'Import locations', icon: MapPinIcon, onClick: () => { locationImportOpen.value = true; } },
+    { label: 'Import streets', icon: MapIcon, onClick: () => { streetImportOpen.value = true; } },
+    { label: 'Import houses', icon: HomeModernIcon, onClick: () => { homeImportOpen.value = true; } },
     { label: 'Clean up canvas', icon: SparklesIcon, onClick: cleanUp },
     { label: 'Download backup', icon: DocumentArrowDownIcon, onClick: downloadBackup },
     theme.isDark.value
@@ -349,6 +365,8 @@ onMounted(async () => {
       labels.fetch(),
       districts.fetch(),
       companionships.fetch(),
+      streets.fetch(),
+      homes.fetch(),
     ]);
     // Load the ward's shared baseline snapshot (if one has been saved).
     if (auth.wardId) await snap.loadSnapshot(auth.wardId);
@@ -523,6 +541,8 @@ const isEmptyCanvas = computed(
     <LabelsModal :open="labelsOpen" @close="labelsOpen = false" />
     <ImportModal :open="importOpen" @close="importOpen = false" />
     <LocationImportModal :open="locationImportOpen" @close="locationImportOpen = false" />
+    <StreetImportModal :open="streetImportOpen" @close="streetImportOpen = false" />
+    <HomeImportModal :open="homeImportOpen" @close="homeImportOpen = false" />
     <WardInviteModal :open="inviteOpen" @close="inviteOpen = false" />
     <ChangesModal :open="changesOpen" @close="changesOpen = false" />
     <CardContextMenu

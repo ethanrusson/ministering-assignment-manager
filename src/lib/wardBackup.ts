@@ -11,18 +11,19 @@
 //   companionship_households         (FK -> companionships, households)
 //   household_labels                 (FK -> households, labels)
 //   location_reviews                 (FK -> households)
-//   streets                          (no FK to other ward data)
+//   streets, homes                   (no FK to other ward data)
 //
 // Delete order is the reverse. Rows keep their original ids so positions and
 // joins survive the round-trip; only ward_id is rewritten to the current ward.
 //
-// Version 1 files predate the map tables; they restore with those tables empty.
+// Version 1 files predate the map tables, and version 2 files predate homes;
+// they restore with those tables empty.
 
 import { supabase } from './supabase';
 import type { Database, Json } from '@/types/database';
 
-export const BACKUP_VERSION = 2;
-const SUPPORTED_VERSIONS = [1, 2];
+export const BACKUP_VERSION = 3;
+const SUPPORTED_VERSIONS = [1, 2, 3];
 
 interface ElderRow {
   id: string;
@@ -52,6 +53,7 @@ interface HouseholdRow {
 type LocationGroupRow = Database['public']['Tables']['location_groups']['Row'];
 type LocationReviewRow = Database['public']['Tables']['location_reviews']['Row'];
 type StreetRow = Database['public']['Tables']['streets']['Row'];
+type HomeRow = Database['public']['Tables']['homes']['Row'];
 interface LabelRow {
   id: string;
   ward_id: string;
@@ -106,6 +108,8 @@ export interface WardBackup {
   location_groups?: LocationGroupRow[];
   location_reviews?: LocationReviewRow[];
   streets?: StreetRow[];
+  /** Added in version 3. */
+  homes?: HomeRow[];
 }
 
 export async function exportWardBackup(wardId: string): Promise<WardBackup> {
@@ -122,6 +126,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     groupsRes,
     reviewsRes,
     streetsRes,
+    homesRes,
   ] = await Promise.all([
     supabase.from('wards').select('name, boundary').eq('id', wardId).maybeSingle(),
     supabase.from('elders').select('*').eq('ward_id', wardId),
@@ -135,6 +140,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     supabase.from('location_groups').select('*').eq('ward_id', wardId),
     supabase.from('location_reviews').select('*').eq('ward_id', wardId),
     supabase.from('streets').select('*').eq('ward_id', wardId),
+    supabase.from('homes').select('*').eq('ward_id', wardId),
   ]);
 
   for (const r of [
@@ -150,6 +156,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     groupsRes,
     reviewsRes,
     streetsRes,
+    homesRes,
   ]) {
     if (r.error) throw r.error;
   }
@@ -169,6 +176,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     location_groups: groupsRes.data ?? [],
     location_reviews: reviewsRes.data ?? [],
     streets: streetsRes.data ?? [],
+    homes: homesRes.data ?? [],
   };
 }
 
@@ -192,7 +200,7 @@ export function validateWardBackup(raw: unknown): WardBackup {
   arr(o.companionship_elders, 'companionship_elders');
   arr(o.companionship_households, 'companionship_households');
   arr(o.household_labels, 'household_labels');
-  for (const key of ['location_groups', 'location_reviews', 'streets'] as const) {
+  for (const key of ['location_groups', 'location_reviews', 'streets', 'homes'] as const) {
     if (o[key] !== undefined) arr(o[key], key);
   }
   return o as WardBackup;
@@ -234,6 +242,7 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   }
 
   for (const table of [
+    'homes',
     'streets',
     'location_reviews',
     'companionships',
@@ -321,6 +330,11 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   const streets = backup.streets ?? [];
   if (streets.length) {
     const { error } = await supabase.from('streets').insert(stamp(streets));
+    if (error) throw error;
+  }
+  const homes = backup.homes ?? [];
+  if (homes.length) {
+    const { error } = await supabase.from('homes').insert(stamp(homes));
     if (error) throw error;
   }
   if (backup.ward.boundary !== undefined) {

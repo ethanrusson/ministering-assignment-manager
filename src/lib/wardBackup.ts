@@ -1,19 +1,28 @@
 // Full-ward backup: export everything to a JSON file, import to replace live state.
 //
 // Tables (in import-safe dependency order):
-//   elders, households, labels       (no FK to other ward data)
+//   location_groups                  (no FK to other ward data)
+//   elders, households, labels       (elders.home_household_id and
+//                                     households.district_id are written in a
+//                                     second pass, once their targets exist)
 //   districts                        (no FK to other ward data)
 //   companionships                   (FK -> districts)
 //   companionship_elders             (FK -> companionships, elders)
 //   companionship_households         (FK -> companionships, households)
 //   household_labels                 (FK -> households, labels)
+//   location_reviews                 (FK -> households)
+//   streets                          (no FK to other ward data)
 //
 // Delete order is the reverse. Rows keep their original ids so positions and
 // joins survive the round-trip; only ward_id is rewritten to the current ward.
+//
+// Version 1 files predate the map tables; they restore with those tables empty.
 
 import { supabase } from './supabase';
+import type { Database, Json } from '@/types/database';
 
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
+const SUPPORTED_VERSIONS = [1, 2];
 
 interface ElderRow {
   id: string;
@@ -22,6 +31,9 @@ interface ElderRow {
   age: number | null;
   hidden: boolean;
   created_at: string;
+  lcr_uuid?: string | null;
+  not_generally_assigned?: boolean;
+  home_household_id?: string | null;
 }
 interface HouseholdRow {
   id: string;
@@ -29,7 +41,17 @@ interface HouseholdRow {
   name: string;
   hidden: boolean;
   created_at: string;
+  lcr_uuid?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  location_source?: 'lcr' | 'manual' | null;
+  location_updated_at?: string | null;
+  district_id?: string | null;
+  location_group_id?: string | null;
 }
+type LocationGroupRow = Database['public']['Tables']['location_groups']['Row'];
+type LocationReviewRow = Database['public']['Tables']['location_reviews']['Row'];
+type StreetRow = Database['public']['Tables']['streets']['Row'];
 interface LabelRow {
   id: string;
   ward_id: string;
@@ -71,7 +93,7 @@ interface HouseholdLabelLink {
 export interface WardBackup {
   version: number;
   exported_at: string;
-  ward: { name: string | null };
+  ward: { name: string | null; boundary?: Json | null };
   elders: ElderRow[];
   households: HouseholdRow[];
   labels: LabelRow[];
@@ -80,6 +102,10 @@ export interface WardBackup {
   companionship_elders: CompanionshipElderLink[];
   companionship_households: CompanionshipHouseholdLink[];
   household_labels: HouseholdLabelLink[];
+  /** Added in version 2. */
+  location_groups?: LocationGroupRow[];
+  location_reviews?: LocationReviewRow[];
+  streets?: StreetRow[];
 }
 
 export async function exportWardBackup(wardId: string): Promise<WardBackup> {
@@ -93,8 +119,11 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     compEldersRes,
     compHouseholdsRes,
     hhLabelsRes,
+    groupsRes,
+    reviewsRes,
+    streetsRes,
   ] = await Promise.all([
-    supabase.from('wards').select('name').eq('id', wardId).maybeSingle(),
+    supabase.from('wards').select('name, boundary').eq('id', wardId).maybeSingle(),
     supabase.from('elders').select('*').eq('ward_id', wardId),
     supabase.from('households').select('*').eq('ward_id', wardId),
     supabase.from('labels').select('*').eq('ward_id', wardId),
@@ -103,6 +132,9 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     supabase.from('companionship_elders').select('*'),
     supabase.from('companionship_households').select('*'),
     supabase.from('household_labels').select('*'),
+    supabase.from('location_groups').select('*').eq('ward_id', wardId),
+    supabase.from('location_reviews').select('*').eq('ward_id', wardId),
+    supabase.from('streets').select('*').eq('ward_id', wardId),
   ]);
 
   for (const r of [
@@ -115,6 +147,9 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     compEldersRes,
     compHouseholdsRes,
     hhLabelsRes,
+    groupsRes,
+    reviewsRes,
+    streetsRes,
   ]) {
     if (r.error) throw r.error;
   }
@@ -122,7 +157,7 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
   return {
     version: BACKUP_VERSION,
     exported_at: new Date().toISOString(),
-    ward: { name: wardRes.data?.name ?? null },
+    ward: { name: wardRes.data?.name ?? null, boundary: wardRes.data?.boundary ?? null },
     elders: (eldersRes.data ?? []) as ElderRow[],
     households: (householdsRes.data ?? []) as HouseholdRow[],
     labels: (labelsRes.data ?? []) as LabelRow[],
@@ -131,15 +166,18 @@ export async function exportWardBackup(wardId: string): Promise<WardBackup> {
     companionship_elders: (compEldersRes.data ?? []) as CompanionshipElderLink[],
     companionship_households: (compHouseholdsRes.data ?? []) as CompanionshipHouseholdLink[],
     household_labels: (hhLabelsRes.data ?? []) as HouseholdLabelLink[],
+    location_groups: groupsRes.data ?? [],
+    location_reviews: reviewsRes.data ?? [],
+    streets: streetsRes.data ?? [],
   };
 }
 
 export function validateWardBackup(raw: unknown): WardBackup {
   if (!raw || typeof raw !== 'object') throw new Error('Backup file is not a JSON object.');
   const o = raw as Partial<WardBackup>;
-  if (o.version !== BACKUP_VERSION) {
+  if (!SUPPORTED_VERSIONS.includes(o.version as number)) {
     throw new Error(
-      `Backup version ${o.version ?? '(missing)'} not supported. Expected ${BACKUP_VERSION}.`,
+      `Backup version ${o.version ?? '(missing)'} not supported. Expected ${SUPPORTED_VERSIONS.join(' or ')}.`,
     );
   }
   const arr = (v: unknown, name: string): unknown[] => {
@@ -154,6 +192,9 @@ export function validateWardBackup(raw: unknown): WardBackup {
   arr(o.companionship_elders, 'companionship_elders');
   arr(o.companionship_households, 'companionship_households');
   arr(o.household_labels, 'household_labels');
+  for (const key of ['location_groups', 'location_reviews', 'streets'] as const) {
+    if (o[key] !== undefined) arr(o[key], key);
+  }
   return o as WardBackup;
 }
 
@@ -192,7 +233,16 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
     if (r3.error) throw r3.error;
   }
 
-  for (const table of ['companionships', 'districts', 'labels', 'households', 'elders'] as const) {
+  for (const table of [
+    'streets',
+    'location_reviews',
+    'companionships',
+    'districts',
+    'labels',
+    'households',
+    'elders',
+    'location_groups',
+  ] as const) {
     const { error } = await supabase.from(table).delete().eq('ward_id', wardId);
     if (error) throw error;
   }
@@ -204,12 +254,22 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   const stamp = <T extends { ward_id?: string }>(rows: T[]) =>
     rows.map((r) => ({ ...r, ward_id: wardId }));
 
+  const groups = backup.location_groups ?? [];
+  if (groups.length) {
+    const { error } = await supabase.from('location_groups').insert(stamp(groups));
+    if (error) throw error;
+  }
+  // Cross-references to rows not inserted yet are held back for a second pass.
   if (backup.elders.length) {
-    const { error } = await supabase.from('elders').insert(stamp(backup.elders));
+    const { error } = await supabase
+      .from('elders')
+      .insert(stamp(backup.elders).map((r) => ({ ...r, home_household_id: null })));
     if (error) throw error;
   }
   if (backup.households.length) {
-    const { error } = await supabase.from('households').insert(stamp(backup.households));
+    const { error } = await supabase
+      .from('households')
+      .insert(stamp(backup.households).map((r) => ({ ...r, district_id: null })));
     if (error) throw error;
   }
   if (backup.labels.length) {
@@ -238,6 +298,36 @@ export async function importWardBackup(wardId: string, backup: WardBackup): Prom
   }
   if (backup.household_labels.length) {
     const { error } = await supabase.from('household_labels').insert(backup.household_labels);
+    if (error) throw error;
+  }
+
+  // Second pass: cross-references now that every target row exists.
+  const eldersWithHome = backup.elders.filter((r) => r.home_household_id);
+  if (eldersWithHome.length) {
+    const { error } = await supabase.from('elders').upsert(stamp(eldersWithHome));
+    if (error) throw error;
+  }
+  const householdsWithDistrict = backup.households.filter((r) => r.district_id);
+  if (householdsWithDistrict.length) {
+    const { error } = await supabase.from('households').upsert(stamp(householdsWithDistrict));
+    if (error) throw error;
+  }
+
+  const reviews = backup.location_reviews ?? [];
+  if (reviews.length) {
+    const { error } = await supabase.from('location_reviews').insert(stamp(reviews));
+    if (error) throw error;
+  }
+  const streets = backup.streets ?? [];
+  if (streets.length) {
+    const { error } = await supabase.from('streets').insert(stamp(streets));
+    if (error) throw error;
+  }
+  if (backup.ward.boundary !== undefined) {
+    const { error } = await supabase
+      .from('wards')
+      .update({ boundary: backup.ward.boundary })
+      .eq('id', wardId);
     if (error) throw error;
   }
 }

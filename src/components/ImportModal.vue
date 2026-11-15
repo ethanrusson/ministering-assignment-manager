@@ -9,6 +9,7 @@ import {
   type ExistingHousehold,
 } from '@/lib/lcr/diff';
 import { applyStructure } from '@/lib/lcr/applyStructure';
+import { homeLinksByHeadOfHousehold } from '@/lib/lcr/homeLinks';
 import {
   isPlanEmpty,
   modeUnavailableReason,
@@ -62,6 +63,14 @@ const modeBlocked = computed(() =>
   parsed.value ? modeUnavailableReason(mode.value, parsed.value) : null,
 );
 
+const ambiguousNames = computed(() =>
+  diff.value
+    ? [...diff.value.elders, ...diff.value.households]
+        .filter((c) => c.kind === 'ambiguous')
+        .map((c) => c.parsed.name)
+    : [],
+);
+
 const nothingToDo = computed(() => (plan.value ? isPlanEmpty(plan.value) : true));
 
 const willReplaceStructure = computed(
@@ -100,11 +109,14 @@ function preview() {
         name: e.name,
         age: e.age,
         hidden: e.hidden,
+        lcrUuid: e.lcr_uuid,
+        notGenerallyAssigned: e.not_generally_assigned,
       })),
       households: households.items.map((h) => ({
         id: h.id,
         name: h.name,
         hidden: h.hidden,
+        lcrUuid: h.lcr_uuid,
       })),
     };
     diff.value = diffImport(result, existing);
@@ -122,14 +134,45 @@ async function apply() {
   errorMsg.value = null;
   try {
     // 1) People. The plan already filtered these down to the chosen mode.
-    for (const e of p.eldersToAdd) await elders.add(e.name, e.age);
+    // Identity first, so everything below can match people by LCR ID.
+    for (const u of p.elderIdentityUpdates) await elders.update(u.id, u.patch);
+    for (const u of p.householdIdentityUpdates) await households.update(u.id, u.patch);
+    const identityCount = p.elderIdentityUpdates.length + p.householdIdentityUpdates.length;
+    if (identityCount) {
+      applyLog.value.push(
+        `Updated LCR IDs, names or flags on ${identityCount} existing ${identityCount === 1 ? 'person' : 'people'}.`,
+      );
+    }
+
+    for (const e of p.eldersToAdd) {
+      await elders.add(e.name, e.age, {
+        lcr_uuid: e.legacyId,
+        not_generally_assigned: e.notGenerallyAssigned,
+      });
+    }
     for (const u of p.elderAgeUpdates) await elders.update(u.id, { age: u.age });
     applyLog.value.push(
       `Elders: +${p.eldersToAdd.length} added, ${p.elderAgeUpdates.length} ages updated.`,
     );
 
-    for (const h of p.householdsToAdd) await households.add(h.name);
+    for (const h of p.householdsToAdd) await households.add(h.name, { lcr_uuid: h.legacyId });
     applyLog.value.push(`Households: +${p.householdsToAdd.length} added.`);
+
+    // Elders who head a household live there.
+    const homeLinks = homeLinksByHeadOfHousehold(
+      elders.items.map((e) => ({
+        id: e.id,
+        lcrUuid: e.lcr_uuid,
+        homeHouseholdId: e.home_household_id,
+      })),
+      households.items.map((h) => ({ id: h.id, lcrUuid: h.lcr_uuid })),
+    );
+    for (const l of homeLinks) {
+      await elders.update(l.elderId, { home_household_id: l.householdId });
+    }
+    if (homeLinks.length) {
+      applyLog.value.push(`Linked ${homeLinks.length} elders to the household they head.`);
+    }
 
     const unassignedAdded =
       newUnassigned.value.elders.length + newUnassigned.value.households.length;
@@ -146,8 +189,12 @@ async function apply() {
           wardId: auth.wardId,
           districts: districts.items.map((d) => ({ id: d.id, name: d.name })),
           companionships: companionships.items.map((c) => ({ id: c.id })),
-          elders: elders.items.map((e) => ({ id: e.id, name: e.name })),
-          households: households.items.map((h) => ({ id: h.id, name: h.name })),
+          elders: elders.items.map((e) => ({ id: e.id, name: e.name, lcrUuid: e.lcr_uuid })),
+          households: households.items.map((h) => ({
+            id: h.id,
+            name: h.name,
+            lcrUuid: h.lcr_uuid,
+          })),
         },
       });
       // Refresh structure stores so the canvas picks up the new rows
@@ -254,6 +301,10 @@ async function apply() {
                   <li>+{{ plan.eldersToAdd.length }} new elders</li>
                   <li>+{{ plan.householdsToAdd.length }} new households</li>
                   <li>{{ plan.elderAgeUpdates.length }} elder ages updated</li>
+                  <li v-if="stats.newlyLinked">
+                    {{ stats.newlyLinked }} existing people linked to their LCR ID
+                  </li>
+                  <li v-if="stats.renamed">{{ stats.renamed }} renamed to match LCR</li>
                   <li :class="plan.replaceStructure ? 'font-medium text-warn-600' : 'text-stone-700'">
                     {{
                       plan.replaceStructure
@@ -267,6 +318,18 @@ async function apply() {
                   </li>
                 </ul>
               </div>
+            </div>
+
+            <div
+              v-if="stats.ambiguous"
+              class="rounded border border-warn-200 bg-warn-50 px-3 py-2 text-xs text-warn-600"
+            >
+              <p>
+                ⚠️ {{ stats.ambiguous }} {{ stats.ambiguous === 1 ? 'name matches' : 'names match' }}
+                more than one person already here, so
+                {{ stats.ambiguous === 1 ? 'it was' : 'they were' }} left alone:
+                {{ ambiguousNames.join('; ') }}. Rename or hide the duplicate, then import again.
+              </p>
             </div>
 
             <div

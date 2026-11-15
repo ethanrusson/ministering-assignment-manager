@@ -81,27 +81,45 @@ describe('planImport', () => {
   });
 
   it('unassigned mode plans no writes when the page had no roster', () => {
-    const d = diffImport(parser.parse(syntheticHtml()), existing());
+    // Rows already linked to their LCR IDs, so there is no ID bookkeeping either.
+    const linked = existing();
+    linked.elders[0].lcrUuid = 'e-1';
+    linked.households[0].lcrUuid = 'h-1';
+    const d = diffImport(parser.parse(syntheticHtml()), linked);
     const p = planImport(d, 'unassigned');
     expect(p.eldersToAdd).toEqual([]);
     expect(p.householdsToAdd).toEqual([]);
     expect(isPlanEmpty(p)).toBe(true);
+  });
+
+  it('unassigned mode without a roster still links LCR IDs, and nothing else', () => {
+    const d = diffImport(parser.parse(syntheticHtml()), existing());
+    const p = planImport(d, 'unassigned');
+    expect(p.eldersToAdd).toEqual([]);
+    expect(p.householdsToAdd).toEqual([]);
+    expect(p.elderAgeUpdates).toEqual([]);
+    expect(p.elderIdentityUpdates.map((u) => u.id)).toEqual(['db-1']);
+    expect(p.householdIdentityUpdates.map((u) => u.id)).toEqual(['hd-1']);
   });
 });
 
 describe('isPlanEmpty', () => {
   it('is false when the board would be replaced even with no people to add', () => {
     const d = diffImport(parser.parse(syntheticRosterHtml()), {
+      // Everyone already here and fully linked, so only 'full' has work to do.
       elders: parser.parse(syntheticRosterHtml()).elders.map((e, i) => ({
         id: `x${i}`,
         name: e.name,
         age: e.age,
         hidden: false,
+        lcrUuid: e.legacyId,
+        notGenerallyAssigned: e.notGenerallyAssigned,
       })),
       households: parser.parse(syntheticRosterHtml()).households.map((h, i) => ({
         id: `y${i}`,
         name: h.name,
         hidden: false,
+        lcrUuid: h.legacyId,
       })),
     });
     expect(isPlanEmpty(planImport(d, 'full'))).toBe(false);
@@ -125,5 +143,40 @@ describe('modeUnavailableReason', () => {
   it('does not block the other modes without a roster', () => {
     expect(modeUnavailableReason('full', { hasEligibleRoster: false })).toBeNull();
     expect(modeUnavailableReason('people', { hasEligibleRoster: false })).toBeNull();
+  });
+});
+
+describe('planImport identity updates', () => {
+  // db-1 is linked by name (gets its LCR ID); hd-1 likewise.
+  it('applies LCR ID fixes in every mode, including unassigned', () => {
+    for (const mode of ['full', 'people', 'unassigned'] as const) {
+      const p = planImport(rosterDiff(), mode);
+      expect(p.elderIdentityUpdates.map((u) => [u.id, u.patch.lcr_uuid])).toContainEqual([
+        'db-1',
+        'e-1',
+      ]);
+      expect(p.householdIdentityUpdates).toEqual([
+        { id: 'hd-1', name: 'Carter, Casey', patch: { lcr_uuid: 'h-1' } },
+      ]);
+    }
+  });
+
+  it('is not empty when the only work is linking IDs', () => {
+    const linkedEverything = diffImport(parser.parse(syntheticRosterHtml()), {
+      elders: [{ id: 'db-1', name: 'Alpha, Aaron', age: 42, hidden: false }],
+      households: [],
+    });
+    const p = planImport(linkedEverything, 'unassigned');
+    expect(p.eldersToAdd.length + p.householdsToAdd.length).toBeGreaterThan(0);
+
+    const onlyIdentity = {
+      ...linkedEverything,
+      elders: linkedEverything.elders.filter((c) => c.kind !== 'add'),
+      households: [],
+    };
+    const p2 = planImport(onlyIdentity, 'people');
+    expect(p2.eldersToAdd).toEqual([]);
+    expect(p2.elderIdentityUpdates.length).toBe(1);
+    expect(isPlanEmpty({ ...p2, replaceStructure: false })).toBe(false);
   });
 });

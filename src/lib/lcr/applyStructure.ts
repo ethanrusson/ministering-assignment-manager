@@ -1,6 +1,6 @@
 // Helpers for the second half of an LCR import: write districts and
 // companionships (and their elder/household links) at default canvas positions.
-// Names are matched case-insensitively against existing rows.
+// People are matched by LCR person UUID first, then by case-insensitive name.
 
 import { supabase } from '@/lib/supabase';
 import {
@@ -29,8 +29,8 @@ export interface ApplyStructureInput {
     wardId: string;
     districts: { id: string; name: string }[];
     companionships: { id: string }[];
-    elders: { id: string; name: string }[];
-    households: { id: string; name: string }[];
+    elders: { id: string; name: string; lcrUuid?: string | null }[];
+    households: { id: string; name: string; lcrUuid?: string | null }[];
   };
 }
 
@@ -117,19 +117,28 @@ export async function applyStructure(
     });
   }
 
-  // 3) Build elder/household name → DB id lookups.
-  const eldersByName = new Map(existing.elders.map((e) => [norm(e.name), e.id]));
-  const householdsByName = new Map(existing.households.map((h) => [norm(h.name), h.id]));
+  // 3) Map parsed people (LCR UUID) to DB ids: stored UUID first, then name
+  //    among rows not yet linked (a linked namesake is a different person).
+  const lookup = (rows: { id: string; name: string; lcrUuid?: string | null }[]) => {
+    const byUuid = new Map<string, string>();
+    const byName = new Map<string, string>();
+    for (const r of rows) {
+      if (r.lcrUuid) byUuid.set(r.lcrUuid, r.id);
+      else byName.set(norm(r.name), r.id);
+    }
+    return (uuid: string, name: string) => byUuid.get(uuid) ?? byName.get(norm(name));
+  };
+  const elderDbId = lookup(existing.elders);
+  const householdDbId = lookup(existing.households);
 
-  // Build a map of parsed elder legacyId -> DB id (via parsed name).
   const parsedElderIdToDb = new Map<string, string>();
   for (const e of parsed.elders) {
-    const id = eldersByName.get(norm(e.name));
+    const id = elderDbId(e.legacyId, e.name);
     if (id) parsedElderIdToDb.set(e.legacyId, id);
   }
   const parsedHouseholdIdToDb = new Map<string, string>();
   for (const h of parsed.households) {
-    const id = householdsByName.get(norm(h.name));
+    const id = householdDbId(h.legacyId, h.name);
     if (id) parsedHouseholdIdToDb.set(h.legacyId, id);
   }
 

@@ -36,12 +36,16 @@ export const useEldersStore = defineStore('elders', () => {
 
   onScopeDispose(() => { channel?.unsubscribe(); });
 
-  async function add(name: string, age: number | null) {
+  async function add(
+    name: string,
+    age: number | null,
+    extra: Partial<Pick<Elder, 'lcr_uuid' | 'not_generally_assigned'>> = {},
+  ) {
     const auth = useAuthStore();
     if (!auth.wardId) throw new Error('No ward.');
     const { data, error } = await supabase
       .from('elders')
-      .insert({ ward_id: auth.wardId, name, age })
+      .insert({ ward_id: auth.wardId, name, age, ...extra })
       .select()
       .single();
     if (error) throw error;
@@ -50,7 +54,15 @@ export const useEldersStore = defineStore('elders', () => {
     return data;
   }
 
-  async function update(id: string, patch: Partial<Pick<Elder, 'name' | 'age' | 'hidden'>>) {
+  async function update(
+    id: string,
+    patch: Partial<
+      Pick<
+        Elder,
+        'name' | 'age' | 'hidden' | 'lcr_uuid' | 'not_generally_assigned' | 'home_household_id'
+      >
+    >,
+  ) {
     const { data, error } = await supabase
       .from('elders')
       .update(patch)

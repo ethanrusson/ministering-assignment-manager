@@ -2,7 +2,7 @@
 // Kept pure so the preview and the apply step can never disagree about what
 // an import is going to do.
 
-import type { DiffResult } from './diff';
+import type { DiffResult, ElderIdentityPatch, HouseholdIdentityPatch } from './diff';
 import type { ParsedElder, ParsedHousehold, ParseResult } from './parser';
 
 export type ImportMode =
@@ -20,11 +20,23 @@ export interface ElderAgeUpdate {
   age: number | null;
 }
 
+/**
+ * LCR ID, name and flag fixes for people who already exist locally. They never
+ * touch the board, so every mode applies them.
+ */
+export interface IdentityUpdate<P> {
+  id: string;
+  name: string;
+  patch: P;
+}
+
 export interface ImportPlan {
   mode: ImportMode;
   eldersToAdd: ParsedElder[];
   householdsToAdd: ParsedHousehold[];
   elderAgeUpdates: ElderAgeUpdate[];
+  elderIdentityUpdates: IdentityUpdate<ElderIdentityPatch>[];
+  householdIdentityUpdates: IdentityUpdate<HouseholdIdentityPatch>[];
   /** True only for 'full' — the one mode that deletes and rebuilds the board. */
   replaceStructure: boolean;
   /** New-to-us people this mode deliberately leaves behind, so the UI can say so. */
@@ -59,11 +71,20 @@ export function planImport(diff: DiffResult, mode: ImportMode): ImportPlan {
         age: c.parsed.age,
       }));
 
+  const elderIdentityUpdates = diff.elders
+    .filter((c) => c.existing && c.identity)
+    .map((c) => ({ id: c.existing!.id, name: c.parsed.name, patch: c.identity! }));
+  const householdIdentityUpdates = diff.households
+    .filter((c) => c.existing && c.identity)
+    .map((c) => ({ id: c.existing!.id, name: c.parsed.name, patch: c.identity! }));
+
   return {
     mode,
     eldersToAdd,
     householdsToAdd,
     elderAgeUpdates,
+    elderIdentityUpdates,
+    householdIdentityUpdates,
     replaceStructure: mode === 'full',
     skipped: {
       assignedElders: unassignedOnly
@@ -83,7 +104,9 @@ export function isPlanEmpty(plan: ImportPlan): boolean {
     !plan.replaceStructure &&
     plan.eldersToAdd.length === 0 &&
     plan.householdsToAdd.length === 0 &&
-    plan.elderAgeUpdates.length === 0
+    plan.elderAgeUpdates.length === 0 &&
+    plan.elderIdentityUpdates.length === 0 &&
+    plan.householdIdentityUpdates.length === 0
   );
 }
 

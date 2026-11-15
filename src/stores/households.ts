@@ -76,12 +76,12 @@ export const useHouseholdsStore = defineStore('households', () => {
     channelLabels?.unsubscribe();
   });
 
-  async function add(name: string) {
+  async function add(name: string, extra: Partial<Pick<Household, 'lcr_uuid'>> = {}) {
     const auth = useAuthStore();
     if (!auth.wardId) throw new Error('No ward.');
     const { data, error } = await supabase
       .from('households')
-      .insert({ ward_id: auth.wardId, name })
+      .insert({ ward_id: auth.wardId, name, ...extra })
       .select()
       .single();
     if (error) throw error;
@@ -90,7 +90,10 @@ export const useHouseholdsStore = defineStore('households', () => {
     return data;
   }
 
-  async function update(id: string, patch: Partial<Pick<Household, 'name' | 'hidden'>>) {
+  async function update(
+    id: string,
+    patch: Partial<Pick<Household, 'name' | 'hidden' | 'lcr_uuid'>>,
+  ) {
     const { data, error } = await supabase
       .from('households')
       .update(patch)

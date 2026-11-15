@@ -382,8 +382,8 @@ Questions are answered at each checkpoint and moved into the decision list or th
 
 | Checkpoint | Question | Answer |
 |---|---|---|
-| 0 | Coordinate source and format | |
-| 0 | Household members included? | |
+| 0 | Coordinate source and format | Member Directory API `GET /api/v4/households?unit=<unitNumber>`: raw JSON array, opened in a tab and pasted. See `docs/lcr-directory-structure.md`. |
+| 0 | Household members included? | Yes: every member with person `uuid` (same as ministering `personUuid`) and a `head` flag. |
 | 1 | Label density rule | |
 | 1 | Square size | |
 | 1 | Coloring before Phase 6 | |

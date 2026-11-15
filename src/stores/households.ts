@@ -122,6 +122,23 @@ export const useHouseholdsStore = defineStore('households', () => {
     items.value = items.value.map((h) => fresh.get(h.id) ?? h);
   }
 
+  /** Places a household by hand (D2: a later LCR location replaces it). */
+  async function setManualLocation(id: string, lat: number, lng: number) {
+    const { data, error } = await supabase
+      .from('households')
+      .update({
+        lat,
+        lng,
+        location_source: 'manual',
+        location_updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    items.value = items.value.map((h) => (h.id === id ? data : h));
+  }
+
   async function remove(id: string) {
     const { error } = await supabase.from('households').delete().eq('id', id);
     if (error) throw error;
@@ -175,6 +192,7 @@ export const useHouseholdsStore = defineStore('households', () => {
     add,
     update,
     setLocations,
+    setManualLocation,
     remove,
     setLabels,
   };

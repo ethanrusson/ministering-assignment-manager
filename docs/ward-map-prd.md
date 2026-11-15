@@ -183,18 +183,18 @@ Label-related changes are defined in Phase 3, after its checkpoint.
 
 **Scope**
 1. Each location import creates `location_reviews` rows for:
-   - `no_location`: the household has no coordinates in LCR.
+   - `no_location`: the household has no location anywhere: LCR has none or doesn't list it, and it hasn't been placed by hand.
    - `moved`: coordinates changed by more than a threshold (default 50 m). Store the previous and new positions.
    - ~~`shared_location`~~: dropped (Checkpoint 1). Households at one point are one family's house and stack on the map; revisit for a ward with apartments.
    - `outside_ward`: created once a ward boundary exists (Phase 6). Skipped until then.
-2. A Locations screen: the queue on the left, the map in the middle, and details with actions for the selected item.
-   - `no_location`: drag the household from the queue onto the map → `location_source = 'manual'`. Or leave it unplaced.
-   - `moved`: show the old and new positions with an arrow and the effect on its district and ministers. Accept and keep ministers, or accept and open reassign (reassign arrives in Phase 4; until then, accept only).
+2. A Locations panel on the map (built as a panel over the map rather than a separate screen), opened from a toolbar button:
+   - `no_location`: Place (tap the map where they live → `location_source = 'manual'`), or Leave (dismiss).
+   - `moved`: tap to center it, with a dashed line from its old position. Accept, or accept and open reassign (reassign arrives in Phase 4; until then, accept only). The new LCR position is applied at import.
    - `outside_ward`: keep (dismiss with a reason), adjust the boundary, or mark as moved out (hides the household).
 3. Dismissed items stay dismissed across imports until the underlying data changes again.
 4. A map toolbar badge shows the number of open items.
-5. "Adjust location" from the household popover lets the user drag that household. It sets `location_source = 'manual'` and creates no review item.
-6. "Lives at" for elders the location import couldn't link (Checkpoint 0): pick their home on the map.
+5. "Adjust location" from the household popover: tap the map where the household lives. It sets `location_source = 'manual'` and creates no review item.
+6. "Lives at" for elders the location import couldn't link (Checkpoint 0): Pick home, then tap their household on the map.
 
 **Acceptance**
 - Importing the same data twice creates no duplicate review items.
@@ -394,6 +394,7 @@ Questions are answered at each checkpoint and moved into the decision list or th
 | 1 | Square size | 22 px kept on desktop. Not yet checked on iPad. |
 | 1 | Coloring before Phase 6 | The companionship's district, as built. |
 | 2 | "Moved" threshold | |
+| 2 | "Mark as moved out" needed? | No. Move-outs whose records haven't left show as "no location": Leave clears them, and they're hidden once the ministering import reports them gone. |
 | 3 | Label taxonomy and seed set | |
 | 3 | Labels on elders | |
 | 3 | Automatic and expiring labels | |

@@ -42,6 +42,9 @@ import {
 import { placeStreetLabels } from './streets';
 import { fitLabels, LABEL_OFFSET } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
+import LocationsPanel from './LocationsPanel.vue';
+import { useLocationReviewsStore } from '@/stores/locationReviews';
+import type { MovedData } from '@/lib/lcr/reviews';
 
 /** Zoom limits in screen px per meter: about 200 km across down to 100 m. */
 const MIN_SCALE = 0.005;
@@ -59,6 +62,7 @@ const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 const streets = useStreetsStore();
 const homes = useHomesStore();
+const reviews = useLocationReviewsStore();
 
 const root = ref<HTMLDivElement | null>(null);
 const size = ref({ w: 0, h: 0 });
@@ -372,6 +376,68 @@ async function editHomeAt(e: MouseEvent) {
   }
 }
 
+// ─── Locations review (Phase 2) ────────────────────────────────────────────
+
+const locationsOpen = ref(false);
+
+/** Open review items for visible households, plus elders with no home yet. */
+const locationsCount = computed(
+  () =>
+    reviews.open.filter((r) => households.byId.get(r.household_id)?.hidden === false).length +
+    elders.visible.filter((e) => !e.home_household_id).length,
+);
+
+/** Waiting for a tap: where a household lives, or which household an elder lives in. */
+const placing = ref<{ kind: 'household' | 'elder'; id: string; name: string } | null>(null);
+
+function startPlacing(kind: 'household' | 'elder', id: string) {
+  const name =
+    kind === 'household'
+      ? `the ${labelNames(households.byId.get(id)?.name ?? '').short} household`
+      : elderName(id);
+  editingHomes.value = false;
+  placing.value = { kind, id, name };
+}
+
+async function placeHouseholdAt(e: MouseEvent) {
+  const p = placing.value;
+  if (p?.kind !== 'household') return;
+  const s = local(e);
+  const at = unproject({ x: (s.x - vp.tx) / vp.scale, y: (s.y - vp.ty) / vp.scale }, origin.value);
+  placing.value = null;
+  try {
+    await households.setManualLocation(p.id, at.lat, at.lng);
+    for (const r of reviews.open.filter((r) => r.household_id === p.id && r.kind === 'no_location')) {
+      await reviews.resolve(r.id, 'placed');
+    }
+    select(p.id);
+  } catch (err) {
+    pushError(err);
+  }
+}
+
+async function setElderHome(householdId: string) {
+  const p = placing.value;
+  if (p?.kind !== 'elder') return;
+  placing.value = null;
+  try {
+    await elders.update(p.id, { home_household_id: householdId });
+    select(householdId);
+  } catch (err) {
+    pushError(err);
+  }
+}
+
+/** For a selected household with an open "moved" review: where it was, in world-layer px. */
+const movedFrom = computed(() => {
+  const id = selectedId.value;
+  const r = id ? reviews.open.find((x) => x.household_id === id && x.kind === 'moved') : null;
+  const g = id ? groupOf.value.get(id) : null;
+  if (!r || !g) return null;
+  const from = project((r.data as MovedData).from, origin.value);
+  return { x1: from.x * vp.scale, y1: from.y * vp.scale, ...placeOf(g) };
+});
+
 // ─── Streets ───────────────────────────────────────────────────────────────
 
 /** Streets in world meters; reprojected only when streets or the origin change. */
@@ -424,6 +490,7 @@ function zoomBy(factor: number) {
  * drawn on top of each other when zoomed out).
  */
 function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) {
+  if (placing.value?.kind === 'household') return void placeHouseholdAt(e);
   const p = local(e);
   const x = p.x - vp.tx;
   const y = p.y - vp.ty;
@@ -436,7 +503,9 @@ function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) 
     g.items.map((n) => n.id),
   );
   const i = ids.indexOf(selectedId.value ?? '');
-  select(i < 0 ? tapped.items[0].id : ids[(i + 1) % ids.length]);
+  const next = i < 0 ? tapped.items[0].id : ids[(i + 1) % ids.length];
+  if (placing.value?.kind === 'elder') void setElderHome(next);
+  else select(next);
 }
 
 /** Center a household and select it (search results). */
@@ -523,7 +592,9 @@ function onClickCapture(e: MouseEvent) {
 
 function onBackgroundClick(e: MouseEvent) {
   if ((e.target as HTMLElement).closest('[data-household], [data-no-pan]')) return;
-  if (editingHomes.value) editHomeAt(e);
+  if (placing.value?.kind === 'household') void placeHouseholdAt(e);
+  else if (placing.value) return;
+  else if (editingHomes.value) void editHomeAt(e);
   else selectedId.value = null;
 }
 
@@ -537,7 +608,9 @@ function onWheel(e: WheelEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape') selectedId.value = null;
+  if (e.key !== 'Escape') return;
+  if (placing.value) placing.value = null;
+  else selectedId.value = null;
 }
 
 let observer: ResizeObserver | null = null;
@@ -646,6 +719,17 @@ onBeforeUnmount(() => {
             stroke-dasharray="1 4"
           />
         </g>
+        <g v-if="movedFrom" :style="{ stroke: v('stone-600'), fill: v('stone-600') }">
+          <line
+            :x1="movedFrom.x1"
+            :y1="movedFrom.y1"
+            :x2="movedFrom.x"
+            :y2="movedFrom.y"
+            stroke-width="2"
+            stroke-dasharray="4 3"
+          />
+          <circle :cx="movedFrom.x1" :cy="movedFrom.y1" r="4" />
+        </g>
       </svg>
 
       <button
@@ -750,6 +834,14 @@ onBeforeUnmount(() => {
         >
           No companionship assigned.
         </div>
+
+        <button
+          type="button"
+          class="self-start text-xs text-blue-700 hover:underline"
+          @click="startPlacing('household', selectedId!)"
+        >
+          Adjust location
+        </button>
       </div>
     </div>
 
@@ -760,13 +852,34 @@ onBeforeUnmount(() => {
       No household locations yet. Import them from the directory (Settings → Import locations).
     </div>
 
-    <div
+    <button
       v-if="unlocatedCount"
+      type="button"
       data-no-pan
-      class="absolute left-4 top-4 rounded-md bg-white/90 px-2 py-1 text-xs text-stone-600 shadow-sm"
+      class="absolute left-4 top-4 rounded-md bg-white/90 px-2 py-1 text-xs text-stone-600 shadow-sm hover:bg-white"
+      @click="locationsOpen = true"
     >
       {{ unlocatedCount }} without a location
+    </button>
+
+    <div
+      v-if="placing"
+      data-no-pan
+      class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-stone-900/90 px-3 py-2 text-xs text-stone-50 shadow-lg"
+    >
+      <span>
+        {{ placing.kind === 'household' ? `Tap where ${placing.name} lives` : `Tap ${placing.name}'s home` }}
+      </span>
+      <button type="button" class="font-semibold underline" @click="placing = null">Cancel</button>
     </div>
+
+    <LocationsPanel
+      v-if="locationsOpen"
+      @close="locationsOpen = false"
+      @focus="focusHousehold"
+      @place="(id) => startPlacing('household', id)"
+      @pick-home="(id) => startPlacing('elder', id)"
+    />
 
     <div
       v-if="located.length"
@@ -825,6 +938,20 @@ onBeforeUnmount(() => {
         @click="editingHomes = !editingHomes"
       >
         Edit houses
+      </button>
+      <button
+        class="relative h-10 rounded-full px-3 text-xs transition-colors"
+        :class="locationsOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
+        :aria-pressed="locationsOpen"
+        @click="locationsOpen = !locationsOpen"
+      >
+        Locations
+        <span
+          v-if="locationsCount"
+          class="absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+        >
+          {{ locationsCount }}
+        </span>
       </button>
     </div>
   </div>

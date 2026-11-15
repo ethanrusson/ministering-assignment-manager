@@ -8,6 +8,7 @@ import { useDistrictsStore } from '@/stores/districts';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useStreetsStore } from '@/stores/streets';
 import { useHomesStore } from '@/stores/homes';
+import { useLocationReviewsStore } from '@/stores/locationReviews';
 import LeftSidebar from '@/components/sidebar/LeftSidebar.vue';
 import LabelsModal from '@/components/LabelsModal.vue';
 import ImportModal from '@/components/ImportModal.vue';
@@ -66,6 +67,7 @@ const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
 const streets = useStreetsStore();
 const homes = useHomesStore();
+const locationReviews = useLocationReviewsStore();
 
 const snap = useSnapshot();
 const { count: changeCount } = useChangeList();
@@ -80,6 +82,7 @@ useConnectionWatcher([
   () => companionships.fetch(),
   () => streets.fetch(),
   () => homes.fetch(),
+  () => locationReviews.fetch(),
   () => (auth.wardId ? snap.loadSnapshot(auth.wardId) : Promise.resolve()),
 ]);
 
@@ -154,6 +157,7 @@ async function onBackupFileChosen(e: Event) {
       companionships.fetch(),
       streets.fetch(),
       homes.fetch(),
+      locationReviews.fetch(),
       snap.loadSnapshot(auth.wardId),
     ]);
   } catch (e) {
@@ -367,6 +371,7 @@ onMounted(async () => {
       companionships.fetch(),
       streets.fetch(),
       homes.fetch(),
+      locationReviews.fetch(),
     ]);
     // Load the ward's shared baseline snapshot (if one has been saved).
     if (auth.wardId) await snap.loadSnapshot(auth.wardId);

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { parseDirectory } from '@/lib/lcr/directory';
 import { planLocationImport, type LocationPlan } from '@/lib/lcr/locations';
+import { MOVED_THRESHOLD_M, planReviews, type ReviewPlan } from '@/lib/lcr/reviews';
+import { useLocationReviewsStore } from '@/stores/locationReviews';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
 
@@ -10,11 +12,13 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const elders = useEldersStore();
 const households = useHouseholdsStore();
+const reviews = useLocationReviewsStore();
 
 const text = ref('');
 const found = ref(0);
 const warnings = ref<string[]>([]);
 const plan = ref<LocationPlan | null>(null);
+const reviewPlan = ref<ReviewPlan | null>(null);
 const phase = ref<'paste' | 'preview' | 'applying' | 'done'>('paste');
 const errorMsg = ref<string | null>(null);
 const applyLog = ref<string[]>([]);
@@ -24,6 +28,7 @@ function reset() {
   found.value = 0;
   warnings.value = [];
   plan.value = null;
+  reviewPlan.value = null;
   phase.value = 'paste';
   errorMsg.value = null;
   applyLog.value = [];
@@ -57,15 +62,39 @@ function preview() {
         homeHouseholdId: e.home_household_id,
       })),
     });
+    reviewPlan.value = planReviews({
+      households: households.visible.map((h) => ({
+        id: h.id,
+        lat: h.lat,
+        lng: h.lng,
+        source: h.location_source,
+      })),
+      updates: plan.value.locationUpdates,
+      noLcrLocation: [...plan.value.noLocation, ...plan.value.notInDirectory].map((h) => h.id),
+      reviews: reviews.items.map((r) => ({
+        id: r.id,
+        householdId: r.household_id,
+        kind: r.kind,
+        status: r.status,
+        data: r.data,
+      })),
+    });
     phase.value = 'preview';
   } catch (e: unknown) {
     errorMsg.value = e instanceof Error ? e.message : 'Failed to parse.';
   }
 }
 
+const movedCount = computed(
+  () =>
+    (reviewPlan.value?.insert.filter((r) => r.kind === 'moved').length ?? 0) +
+    (reviewPlan.value?.update.length ?? 0),
+);
+
 async function apply() {
   const p = plan.value;
-  if (!p) return;
+  const r = reviewPlan.value;
+  if (!p || !r) return;
   phase.value = 'applying';
   errorMsg.value = null;
   try {
@@ -75,6 +104,12 @@ async function apply() {
       await elders.update(l.elderId, { home_household_id: l.householdId });
     }
     applyLog.value.push(`Linked ${p.homeLinks.length} elders to their home.`);
+    await reviews.apply(r);
+    if (r.manualReplaced.length) {
+      applyLog.value.push(`Replaced ${r.manualReplaced.length} hand-placed locations with LCR's.`);
+    }
+    const added = r.insert.length + r.update.length;
+    if (added) applyLog.value.push(`${added} to review under Locations on the map.`);
     phase.value = 'done';
   } catch (e: unknown) {
     errorMsg.value = e instanceof Error ? e.message : 'Apply failed.';
@@ -138,6 +173,12 @@ async function apply() {
                 <span class="text-stone-500">({{ plan.unchanged }} already match)</span>
               </li>
               <li>{{ plan.homeLinks.length }} elders to link to their home</li>
+              <li v-if="movedCount">
+                {{ movedCount }} moved more than {{ MOVED_THRESHOLD_M }} m (to review)
+              </li>
+              <li v-if="reviewPlan?.manualReplaced.length">
+                {{ reviewPlan.manualReplaced.length }} hand-placed locations replaced by LCR's
+              </li>
             </ul>
 
             <div
@@ -185,7 +226,12 @@ async function apply() {
               </button>
               <button
                 class="rounded bg-stone-900 px-3 py-1 text-sm text-white disabled:opacity-50"
-                :disabled="!plan.locationUpdates.length && !plan.homeLinks.length"
+                :disabled="
+                  !plan.locationUpdates.length &&
+                  !plan.homeLinks.length &&
+                  !reviewPlan?.insert.length &&
+                  !reviewPlan?.resolve.length
+                "
                 @click="apply"
               >
                 Apply

@@ -77,7 +77,7 @@ function close() {
         </div>
 
         <!-- Step 1: email form -->
-        <form v-if="!joinLink" @submit.prevent="submit" class="space-y-4">
+        <form v-if="!joinLink" class="space-y-4" @submit.prevent="submit">
           <div>
             <label class="block text-sm font-medium text-stone-700" for="invite-email">
               Email address

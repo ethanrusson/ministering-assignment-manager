@@ -28,8 +28,8 @@ async function submit() {
 <template>
   <main class="flex min-h-screen items-center justify-center px-4">
     <form
-      @submit.prevent="submit"
       class="w-full max-w-sm space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+      @submit.prevent="submit"
     >
       <h1 class="text-xl font-semibold">Sign in</h1>
       <div>

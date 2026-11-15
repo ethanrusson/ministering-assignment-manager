@@ -91,7 +91,7 @@ async function remove(id: string, name: string) {
           </li>
         </ul>
 
-        <form @submit.prevent="add" class="space-y-2 border-t border-stone-200 pt-4">
+        <form class="space-y-2 border-t border-stone-200 pt-4" @submit.prevent="add">
           <h3 class="text-sm font-medium text-stone-700">Add label</h3>
           <div class="flex gap-2">
             <input

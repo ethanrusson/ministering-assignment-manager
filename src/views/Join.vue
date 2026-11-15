@@ -166,8 +166,8 @@ async function signUpAndJoin() {
     <!-- Valid invite — sign-up form -->
     <form
       v-else-if="status === 'valid'"
-      @submit.prevent="signUpAndJoin"
       class="w-full max-w-sm space-y-4 rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+      @submit.prevent="signUpAndJoin"
     >
       <h1 class="text-xl font-semibold">Join your ward</h1>
       <p class="text-sm text-stone-500">

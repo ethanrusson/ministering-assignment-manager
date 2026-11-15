@@ -101,7 +101,7 @@ async function pick(item: MenuItem) {
         :class="item.variant === 'danger' ? 'text-danger-600' : 'text-stone-700'"
         @click="pick(item)"
       >
-        <component v-if="item.icon" :is="item.icon" class="h-4 w-4 shrink-0" />
+        <component :is="item.icon" v-if="item.icon" class="h-4 w-4 shrink-0" />
         <span>{{ item.label }}</span>
       </button>
     </div>

@@ -91,8 +91,8 @@ const isHovered = computed(() => transfer.state.hoveredDropZone?.kind === 'sideb
 
     <form
       v-if="adding"
-      @submit.prevent="commitAdd"
       class="space-y-2 border-b border-slate-200 bg-slate-50 px-3 py-2"
+      @submit.prevent="commitAdd"
     >
       <input
         v-model="newName"

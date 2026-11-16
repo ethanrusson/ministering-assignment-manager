@@ -8,7 +8,7 @@
 // left out instead (labels.ts).
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { XMarkIcon } from '@heroicons/vue/24/outline';
+import { CheckIcon, EllipsisHorizontalIcon, XMarkIcon } from '@heroicons/vue/24/outline';
 import { useAuthStore } from '@/stores/auth';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
@@ -74,6 +74,7 @@ import { fitLabels, labelOffset, squareSize } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
 import LocationsPanel from './LocationsPanel.vue';
 import FiltersPanel from './FiltersPanel.vue';
+import GapsPanel from './GapsPanel.vue';
 import LabelPicker from '@/components/LabelPicker.vue';
 import LabelChip from '@/components/LabelChip.vue';
 import { useFlags } from '@/lib/useFlags';
@@ -169,7 +170,35 @@ function companionshipDistrictRankOf(householdId: string): number {
 
 const colorBy = ref<ColorBy>('district');
 const filters = ref<MapFilters>(emptyFilters());
-const filtersOpen = ref(false);
+/** The side panel that's open, if any; the toolbar's ⋯ menu opens them. */
+const panel = ref<'filters' | 'gaps' | 'locations' | null>(null);
+const menuOpen = ref(false);
+const togglePanel = (p: NonNullable<typeof panel.value>) => (panel.value = panel.value === p ? null : p);
+
+const menuItems = computed(() => [
+  {
+    label: 'Filters',
+    active: panel.value === 'filters',
+    dot: !!matched.value || colorBy.value !== 'district' || showAll.value,
+    count: 0,
+    run: () => togglePanel('filters'),
+  },
+  { label: 'Gaps', active: panel.value === 'gaps', dot: false, count: 0, run: () => togglePanel('gaps') },
+  {
+    label: 'Locations',
+    active: panel.value === 'locations',
+    dot: false,
+    count: locationsCount.value,
+    run: () => togglePanel('locations'),
+  },
+  {
+    label: 'Edit houses',
+    active: editingHomes.value,
+    dot: false,
+    count: 0,
+    run: () => (editingHomes.value = !editingHomes.value),
+  },
+]);
 
 /** Household ids passing the filters, or null when nothing is filtered. */
 const matched = computed(() => {
@@ -616,7 +645,6 @@ async function editHomeAt(e: MouseEvent) {
 
 // ─── Locations review (Phase 2) ────────────────────────────────────────────
 
-const locationsOpen = ref(false);
 
 /** Open review items for visible households, plus elders with no home yet. */
 const locationsCount = computed(
@@ -737,8 +765,7 @@ function startBoundaryEdit() {
   boundaryDraft.value =
     savedOutline.value ?? simplifyRing(generatedOutline.value, OUTLINE_SIMPLIFY_M);
   selectedId.value = null;
-  filtersOpen.value = false;
-  locationsOpen.value = false;
+  panel.value = null;
   editingHomes.value = false;
   placing.value = null;
 }
@@ -854,8 +881,7 @@ function startDistrictEdit() {
   pickedDistrict.value = districts.items[0]?.id ?? null;
   lasso.value = false;
   selectedId.value = null;
-  filtersOpen.value = false;
-  locationsOpen.value = false;
+  panel.value = null;
   editingHomes.value = false;
   placing.value = null;
 }
@@ -1059,7 +1085,7 @@ function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) 
 
 /** Screen width not covered by an open side panel (w-72 / w-80 plus its margin). */
 const visibleWidth = computed(
-  () => size.value.w - (filtersOpen.value ? 336 : locationsOpen.value ? 304 : 0),
+  () => size.value.w - (panel.value === 'locations' ? 304 : panel.value ? 336 : 0),
 );
 
 /** Center a household and select it (search results, gaps, moved items). */
@@ -1089,6 +1115,7 @@ function local(e: MouseEvent): Point {
 }
 
 function onPointerDown(e: PointerEvent) {
+  if (menuOpen.value && !(e.target as HTMLElement).closest('[data-map-menu]')) menuOpen.value = false;
   if (e.button === 2 || (e.target as HTMLElement).closest('[data-no-pan]')) return;
   suppressClick = false;
   const p = local(e);
@@ -1596,7 +1623,7 @@ onBeforeUnmount(() => {
       type="button"
       data-no-pan
       class="absolute left-4 top-4 rounded-md bg-white/90 px-2 py-1 text-xs text-stone-600 shadow-sm hover:bg-white"
-      @click="locationsOpen = true"
+      @click="panel = 'locations'"
     >
       {{ unlocatedCount }} without a location
     </button>
@@ -1642,24 +1669,25 @@ onBeforeUnmount(() => {
     </div>
 
     <FiltersPanel
-      v-if="filtersOpen"
+      v-if="panel === 'filters'"
       v-model:filters="filters"
       v-model:color-by="colorBy"
       v-model:show-areas="showAreas"
+      v-model:show-all="showAll"
       :split-districts="splitDistricts"
       :home-counts="homeCounts"
-      :flags="flags"
       :match-count="matched ? matched.size : null"
-      @close="filtersOpen = false"
-      @focus-household="focusForReassign"
+      @close="panel = null"
       @edit-boundary="startBoundaryEdit"
       @edit-districts="startDistrictEdit"
     />
 
+    <GapsPanel v-if="panel === 'gaps'" :flags="flags" @close="panel = null" @focus-household="focusForReassign" />
+
     <LocationsPanel
-      v-if="locationsOpen"
+      v-if="panel === 'locations'"
       :move-ins="moveIns"
-      @close="locationsOpen = false"
+      @close="panel = null"
       @focus="focusHousehold"
       @place="(id) => startPlacing('household', id)"
       @pick-home="(id) => startPlacing('elder', id)"
@@ -1709,48 +1737,52 @@ onBeforeUnmount(() => {
       >
         Fit
       </button>
-      <button
-        class="h-10 rounded-full px-3 text-xs transition-colors"
-        :class="showAll ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
-        :aria-pressed="showAll"
-        @click="showAll = !showAll"
-      >
-        All connections
-      </button>
-      <button
-        class="h-10 rounded-full px-3 text-xs transition-colors"
-        :class="editingHomes ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
-        :aria-pressed="editingHomes"
-        @click="editingHomes = !editingHomes"
-      >
-        Edit houses
-      </button>
-      <button
-        class="relative h-10 rounded-full px-3 text-xs transition-colors"
-        :class="filtersOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
-        :aria-pressed="filtersOpen"
-        @click="(filtersOpen = !filtersOpen) && (locationsOpen = false)"
-      >
-        Filters
-        <span
-          v-if="matched || colorBy !== 'district'"
-          class="absolute right-1 top-1.5 h-2 w-2 rounded-full bg-blue-600"
-        />
-      </button>
-      <button
-        class="relative h-10 rounded-full px-3 text-xs transition-colors"
-        :class="locationsOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
-        :aria-pressed="locationsOpen"
-        @click="(locationsOpen = !locationsOpen) && (filtersOpen = false)"
-      >
-        Locations
-        <span
-          v-if="locationsCount"
-          class="absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+      <div class="relative" data-map-menu>
+        <button
+          class="relative flex h-10 w-10 items-center justify-center rounded-full transition-colors"
+          :class="menuOpen ? 'bg-stone-800 text-white' : 'hover:bg-stone-100'"
+          aria-label="More"
+          :aria-expanded="menuOpen"
+          @click="menuOpen = !menuOpen"
         >
-          {{ locationsCount }}
-        </span>
-      </button>
+          <EllipsisHorizontalIcon class="h-5 w-5" />
+          <span
+            v-if="locationsCount"
+            class="absolute -right-1 -top-1 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+          >
+            {{ locationsCount }}
+          </span>
+          <span
+            v-else-if="matched || colorBy !== 'district' || showAll"
+            class="absolute right-1 top-1.5 h-2 w-2 rounded-full bg-blue-600"
+          />
+        </button>
+        <div
+          v-if="menuOpen"
+          role="menu"
+          class="absolute bottom-full right-0 mb-3 w-48 rounded-xl border border-stone-200 bg-white py-1 text-sm shadow-xl"
+        >
+          <button
+            v-for="item in menuItems"
+            :key="item.label"
+            type="button"
+            role="menuitemcheckbox"
+            :aria-checked="item.active"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-stone-100"
+            @click="item.run(), (menuOpen = false)"
+          >
+            <span class="flex-1" :class="item.active && 'font-semibold'">{{ item.label }}</span>
+            <span
+              v-if="item.count"
+              class="min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+            >
+              {{ item.count }}
+            </span>
+            <span v-else-if="item.dot" class="h-2 w-2 rounded-full bg-blue-600" />
+            <CheckIcon v-if="item.active" class="h-4 w-4" />
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

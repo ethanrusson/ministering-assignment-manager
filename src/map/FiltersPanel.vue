@@ -1,34 +1,25 @@
 <script setup lang="ts">
-// Color, filter and gaps for the map (docs/ward-map-prd.md, Phase 3). Counts
-// come from the same flags as the map's fading and coloring, so they agree.
-// Filters combine with AND across types and OR within a type.
+// Color, lines, filters and districts for the map (docs/ward-map-prd.md,
+// Phases 3 and 6). Filters combine with AND across types and OR within a type.
 
 import { computed } from 'vue';
 import { XMarkIcon } from '@heroicons/vue/24/outline';
 import { useCompanionshipsStore } from '@/stores/companionships';
 import { useAuthStore } from '@/stores/auth';
 import { useDistrictsStore } from '@/stores/districts';
-import { useEldersStore } from '@/stores/elders';
-import { useHouseholdsStore } from '@/stores/households';
 import { useLabelsStore } from '@/stores/labels';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
-import { HOUSEHOLD_LIMIT, validateCompanionship } from '@/lib/validation';
+import { HOUSEHOLD_LIMIT } from '@/lib/validation';
 import { labelChipStyle } from '@/lib/labelColors';
-import {
-  ELDER_FLAG_LABELS,
-  HOUSEHOLD_FLAG_LABELS,
-  type ElderFlag,
-  type Flags,
-  type HouseholdFlag,
-} from '@/lib/flags';
+import { HOUSEHOLD_FLAG_LABELS } from '@/lib/flags';
 import { STATUS_PAINT, type ColorBy, type MapFilters } from './mapFilters';
 
 const props = defineProps<{
-  flags: Flags;
   filters: MapFilters;
   colorBy: ColorBy;
   matchCount: number | null;
   showAreas: boolean;
+  showAll: boolean;
   /** Districts whose area is in more than one piece. */
   splitDistricts: string[];
   /** Households per district id. */
@@ -39,14 +30,12 @@ const emit = defineEmits<{
   (e: 'update:filters', v: MapFilters): void;
   (e: 'update:colorBy', v: ColorBy): void;
   (e: 'update:showAreas', v: boolean): void;
+  (e: 'update:showAll', v: boolean): void;
   (e: 'editBoundary'): void;
   (e: 'editDistricts'): void;
-  (e: 'focusHousehold', id: string): void;
 }>();
 
-const households = useHouseholdsStore();
 const auth = useAuthStore();
-const elders = useEldersStore();
 const labels = useLabelsStore();
 const districts = useDistrictsStore();
 const companionships = useCompanionshipsStore();
@@ -68,34 +57,6 @@ function clear() {
   emit('update:filters', { labels: new Set(), flags: new Set(), districts: new Set() });
 }
 
-const householdGaps = computed(() =>
-  (Object.keys(HOUSEHOLD_FLAG_LABELS) as HouseholdFlag[])
-    .map((flag) => ({
-      flag,
-      label: HOUSEHOLD_FLAG_LABELS[flag],
-      items: [...props.flags.households]
-        .filter(([, f]) => f.includes(flag))
-        .map(([id]) => ({ id, name: households.byId.get(id)?.name ?? '' }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    }))
-    .filter((g) => g.items.length),
-);
-
-const elderGaps = computed(() =>
-  (Object.keys(ELDER_FLAG_LABELS) as ElderFlag[])
-    .map((flag) => ({
-      flag,
-      label: ELDER_FLAG_LABELS[flag],
-      items: [...props.flags.elders]
-        .filter(([, f]) => f.includes(flag))
-        .map(([id]) => elders.byId.get(id))
-        .filter((e) => !!e)
-        .map((e) => ({ id: e.id, name: e.name, home: e.home_household_id }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    }))
-    .filter((g) => g.items.length),
-);
-
 /** Per district: its households, companionships, and slots at HOUSEHOLD_LIMIT each. */
 const districtRows = computed(() =>
   districts.items.map((d, i) => {
@@ -105,23 +66,6 @@ const districtRows = computed(() =>
     return { id: d.id, label: `${districtLabel(i)} · ${d.name}`, family: districtFamily(i), homes, comps: comps.length, slots, open: slots - homes };
   }),
 );
-
-/** Companionships breaking a board validation rule (over capacity, no district, …). */
-const companionshipGaps = computed(() =>
-  companionships.items
-    .map((c) => {
-      const ids = companionships.eldersInCompanionship.get(c.id) ?? [];
-      const warnings = validateCompanionship({
-        id: c.id,
-        districtId: c.district_id,
-        elders: ids.map((id) => elders.byId.get(id)).filter((e) => !!e).map((e) => ({ id: e.id, name: e.name, age: e.age })),
-        householdCount: companionships.householdsInCompanionship.get(c.id)?.length ?? 0,
-      });
-      const first = ids.map((id) => elders.byId.get(id)?.home_household_id).find((h) => !!h) ?? null;
-      return { id: c.id, names: ids.map((id) => elders.byId.get(id)?.name.split(',')[0]).join(' & ') || '(empty)', warnings, first };
-    })
-    .filter((c) => c.warnings.length),
-);
 </script>
 
 <template>
@@ -130,7 +74,7 @@ const companionshipGaps = computed(() =>
     class="absolute bottom-24 right-4 top-16 z-20 flex w-80 cursor-default flex-col rounded-xl border border-stone-200 bg-white text-sm shadow-xl"
   >
     <header class="flex items-center justify-between border-b border-stone-200 px-3 py-2">
-      <h2 class="font-semibold">Filters &amp; gaps</h2>
+      <h2 class="font-semibold">Filters</h2>
       <button
         type="button"
         class="rounded-md p-1 text-stone-500 hover:bg-stone-100"
@@ -166,6 +110,19 @@ const companionshipGaps = computed(() =>
             {{ p.label }}
           </li>
         </ul>
+      </section>
+
+      <section>
+        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Lines</h3>
+        <button
+          type="button"
+          class="rounded-full border px-2.5 py-0.5 text-xs"
+          :class="showAll ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
+          :aria-pressed="showAll"
+          @click="emit('update:showAll', !showAll)"
+        >
+          All connections
+        </button>
       </section>
 
       <section>
@@ -285,64 +242,6 @@ const companionshipGaps = computed(() =>
         </table>
       </section>
 
-      <section>
-        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Gaps</h3>
-        <p
-          v-if="!householdGaps.length && !elderGaps.length && !companionshipGaps.length"
-          class="text-stone-500"
-        >
-          Nothing flagged.
-        </p>
-        <details v-for="g in householdGaps" :key="'h-' + g.flag" class="mb-1">
-          <summary class="cursor-pointer py-0.5">
-            {{ g.label }} <span class="text-stone-500">({{ g.items.length }})</span>
-          </summary>
-          <ul class="ml-3 space-y-0.5 py-1">
-            <li v-for="h in g.items" :key="h.id">
-              <button type="button" class="text-left hover:underline" @click="emit('focusHousehold', h.id)">
-                {{ h.name }}
-              </button>
-            </li>
-          </ul>
-        </details>
-        <details v-for="g in elderGaps" :key="'e-' + g.flag" class="mb-1">
-          <summary class="cursor-pointer py-0.5">
-            {{ g.label }} <span class="text-stone-500">({{ g.items.length }})</span>
-          </summary>
-          <ul class="ml-3 space-y-0.5 py-1">
-            <li v-for="e in g.items" :key="e.id">
-              <button
-                v-if="e.home"
-                type="button"
-                class="text-left hover:underline"
-                @click="emit('focusHousehold', e.home)"
-              >
-                {{ e.name }}
-              </button>
-              <span v-else>{{ e.name }}</span>
-            </li>
-          </ul>
-        </details>
-        <details v-if="companionshipGaps.length" class="mb-1">
-          <summary class="cursor-pointer py-0.5">
-            Companionship warnings <span class="text-stone-500">({{ companionshipGaps.length }})</span>
-          </summary>
-          <ul class="ml-3 space-y-1 py-1">
-            <li v-for="c in companionshipGaps" :key="c.id">
-              <button
-                v-if="c.first"
-                type="button"
-                class="text-left hover:underline"
-                @click="emit('focusHousehold', c.first)"
-              >
-                {{ c.names }}
-              </button>
-              <span v-else>{{ c.names }}</span>
-              <span class="block text-xs text-stone-500">{{ c.warnings.map((w) => w.message).join(' ') }}</span>
-            </li>
-          </ul>
-        </details>
-      </section>
     </div>
   </div>
 </template>

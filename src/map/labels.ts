@@ -23,9 +23,23 @@ export interface PlacedLabel {
   above: boolean;
 }
 
-export const SQUARE_HALF = 11;
-/** Gap from the square's center to the near edge of its label, and label height. */
-export const LABEL_OFFSET = 13;
+/**
+ * Square size, px, by zoom (screen px per meter): SQUARE_BASE at SQUARE_BASE_SCALE,
+ * growing with zoom ^ SQUARE_GROWTH, within SQUARE_MIN..SQUARE_MAX.
+ */
+export const SQUARE_BASE = 22;
+export const SQUARE_BASE_SCALE = 1;
+export const SQUARE_GROWTH = 0.3;
+export const SQUARE_MIN = 8;
+export const SQUARE_MAX = 32;
+
+export function squareSize(scale: number): number {
+  const s = SQUARE_BASE * (scale / SQUARE_BASE_SCALE) ** SQUARE_GROWTH;
+  return Math.round(Math.min(SQUARE_MAX, Math.max(SQUARE_MIN, s)));
+}
+
+/** Gap from the square's center to the near edge of its label. */
+export const labelOffset = (square: number) => square / 2 + 2;
 export const LABEL_H = 15;
 const PAD = 1;
 
@@ -38,15 +52,17 @@ interface Rect {
 
 const hits = (a: Rect, b: Rect) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 
-function labelRect(c: LabelCandidate, w: number, above: boolean): Rect {
-  const y0 = above ? c.y - LABEL_OFFSET - LABEL_H : c.y + LABEL_OFFSET;
+function labelRect(c: LabelCandidate, w: number, above: boolean, offset: number): Rect {
+  const y0 = above ? c.y - offset - LABEL_H : c.y + offset;
   return { x0: c.x - w / 2 - PAD, y0: y0 - PAD, x1: c.x + w / 2 + PAD, y1: y0 + LABEL_H + PAD };
 }
 
-export function fitLabels(items: LabelCandidate[]): Map<string, PlacedLabel> {
+export function fitLabels(items: LabelCandidate[], square = SQUARE_BASE): Map<string, PlacedLabel> {
+  const half = square / 2;
+  const offset = labelOffset(square);
   const squares = items.map((c) => ({
     id: c.id,
-    r: { x0: c.x - SQUARE_HALF, y0: c.y - SQUARE_HALF, x1: c.x + SQUARE_HALF, y1: c.y + SQUARE_HALF },
+    r: { x0: c.x - half, y0: c.y - half, x1: c.x + half, y1: c.y + half },
   }));
   const placed = new Map<string, { label: PlacedLabel; rect: Rect }>();
   const free = (c: LabelCandidate, r: Rect) =>
@@ -55,11 +71,11 @@ export function fitLabels(items: LabelCandidate[]): Map<string, PlacedLabel> {
 
   for (const c of items) {
     if (c.force) {
-      placed.set(c.id, { label: { long: true, above: false }, rect: labelRect(c, c.longW, false) });
+      placed.set(c.id, { label: { long: true, above: false }, rect: labelRect(c, c.longW, false, offset) });
       continue;
     }
     for (const above of [false, true]) {
-      const rect = labelRect(c, c.shortW, above);
+      const rect = labelRect(c, c.shortW, above, offset);
       if (free(c, rect)) {
         placed.set(c.id, { label: { long: false, above }, rect });
         break;
@@ -70,7 +86,7 @@ export function fitLabels(items: LabelCandidate[]): Map<string, PlacedLabel> {
   for (const c of items) {
     const p = placed.get(c.id);
     if (!p || p.label.long) continue;
-    const rect = labelRect(c, c.longW, p.label.above);
+    const rect = labelRect(c, c.longW, p.label.above, offset);
     if (free(c, rect)) placed.set(c.id, { label: { long: true, above: p.label.above }, rect });
   }
 

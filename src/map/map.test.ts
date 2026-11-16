@@ -11,7 +11,7 @@ import {
   unproject,
   wardBounds,
 } from './geo';
-import { fitLabels } from './labels';
+import { fitLabels, squareSize } from './labels';
 import { homesToDraw, parseHouses } from './homes';
 import { emptyFilters, matches, statusOf } from './mapFilters';
 import { reassignOptions } from './reassign';
@@ -294,6 +294,21 @@ describe('fitLabels', () => {
   it('always shows a forced name in full', () => {
     const out = fitLabels([{ ...c('a', 0, 0), force: true }, c('b', 0, 30)]);
     expect(out.get('a')).toEqual({ long: true, above: false });
+  });
+
+  it('sizes squares by zoom, within limits', () => {
+    expect(squareSize(1)).toBe(22);
+    expect(squareSize(0.27)).toBeLessThan(16);
+    expect(squareSize(2)).toBeGreaterThan(22);
+    expect(squareSize(0.0001)).toBe(8);
+    expect(squareSize(100)).toBe(32);
+  });
+
+  it('fits more names around smaller squares', () => {
+    // Three in a column 30 px apart: the middle name is boxed in by 22 px squares, not 8 px ones.
+    const items = [c('a', 0, 0), c('b', 0, 30), c('d', 0, 60)];
+    expect([...fitLabels(items, 22).keys()]).toEqual(['a', 'd']);
+    expect(fitLabels(items, 8).size).toBe(3);
   });
 });
 

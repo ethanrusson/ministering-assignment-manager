@@ -70,7 +70,7 @@ import {
   type MinisteringModel,
 } from './connections';
 import { placeStreetLabels } from './streets';
-import { fitLabels, LABEL_OFFSET } from './labels';
+import { fitLabels, labelOffset, squareSize } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
 import LocationsPanel from './LocationsPanel.vue';
 import FiltersPanel from './FiltersPanel.vue';
@@ -94,9 +94,6 @@ import { planOutsideWard, type MovedData } from '@/lib/lcr/reviews';
 /** Zoom limits in screen px per meter: about 200 km across down to 100 m. */
 const MIN_SCALE = 0.005;
 const MAX_SCALE = 8;
-const SQUARE = 22;
-/** How far each household sharing a point peeks out behind the front one, in px. */
-const STACK_OFFSET = 4;
 const POPOVER_W = 290;
 /** Popover keeps this far from the top edge, and clear of the bottom toolbar. */
 const POPOVER_MARGIN = 16;
@@ -126,6 +123,11 @@ const {
 } = usePanZoom(() => auth.wardId, { storageKey: 'mapViewport', min: MIN_SCALE, max: MAX_SCALE });
 
 const v = (name: string) => `rgb(var(--c-${name}))`;
+
+/** Square size at the current zoom (labels.ts, squareSize). */
+const square = computed(() => squareSize(vp.scale));
+/** How far each household sharing a point peeks out behind the front one, in px. */
+const stackOffset = computed(() => Math.max(2, Math.round(square.value * 0.18)));
 
 // ─── Ward data ─────────────────────────────────────────────────────────────
 
@@ -302,6 +304,7 @@ const labelsShown = computed(() => {
         longW: g.longW,
         force: rank(g) === 0,
       })),
+    square.value,
   );
 });
 
@@ -592,7 +595,7 @@ const homesDrawn = computed(() =>
 const editingHomes = ref(false);
 
 function homeAt(at: Point): string | null {
-  const half = SQUARE / 2;
+  const half = square.value / 2;
   const hit = homesDrawn.value.find(
     (h) => Math.abs(h.p.x * vp.scale - at.x) <= half && Math.abs(h.p.y * vp.scale - at.y) <= half,
   );
@@ -1040,7 +1043,7 @@ function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) 
   const p = local(e);
   const x = p.x - vp.tx;
   const y = p.y - vp.ty;
-  const reach = SQUARE / 2 + 2;
+  const reach = square.value / 2 + 2;
   const under = groups.value.filter((g) => {
     const at = placeOf(g);
     return Math.abs(at.x - x) <= reach && Math.abs(at.y - y) <= reach;
@@ -1256,10 +1259,10 @@ onBeforeUnmount(() => {
           <rect
             v-for="h in homesDrawn"
             :key="h.id"
-            :x="h.p.x * vp.scale - SQUARE / 2"
-            :y="h.p.y * vp.scale - SQUARE / 2"
-            :width="SQUARE"
-            :height="SQUARE"
+            :x="h.p.x * vp.scale - square / 2"
+            :y="h.p.y * vp.scale - square / 2"
+            :width="square"
+            :height="square"
             rx="5"
           />
         </g>
@@ -1341,17 +1344,17 @@ onBeforeUnmount(() => {
             v-for="(n, i) in g.behind.slice(0, 2)"
             :key="n.id"
             :mark="n.mark"
-            :size="SQUARE"
+            :size="square"
             class="!absolute left-0 top-0"
-            :style="{ transform: `translate(${(i + 1) * STACK_OFFSET}px, ${-(i + 1) * STACK_OFFSET}px)`, zIndex: -1 - i }"
+            :style="{ transform: `translate(${(i + 1) * stackOffset}px, ${-(i + 1) * stackOffset}px)`, zIndex: -1 - i }"
           />
-          <HouseholdMark :mark="g.front.mark" :size="SQUARE" :selected="g.sel" />
+          <HouseholdMark :mark="g.front.mark" :size="square" :selected="g.sel" />
         </span>
         <span
           v-if="g.label"
           class="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-white/90 px-1 text-[11px] leading-[1.15] text-stone-900"
           :class="g.sel || (conn && !g.faded) ? 'font-semibold' : 'font-medium'"
-          :style="g.label.above ? { bottom: `calc(50% + ${LABEL_OFFSET}px)` } : { top: `calc(50% + ${LABEL_OFFSET}px)` }"
+          :style="g.label.above ? { bottom: `calc(50% + ${labelOffset(square)}px)` } : { top: `calc(50% + ${labelOffset(square)}px)` }"
         >
           {{ g.label.long ? g.front.long : g.front.short }}
         </span>

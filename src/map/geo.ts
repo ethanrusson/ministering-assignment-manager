@@ -73,6 +73,19 @@ export function closestOnSegment(p: Point, a: Point, b: Point): Point {
 }
 
 /** Straight-line distance in meters between two projected points (D10). */
+/** Ray-casting point-in-polygon for an open ring. */
+export function pointInRing(p: Point, r: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const a = r[i];
+    const b = r[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }

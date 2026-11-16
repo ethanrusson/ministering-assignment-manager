@@ -4,7 +4,7 @@
 
 A map view of the ward, drawn by the app itself rather than on a map provider. Each household appears as a labeled square, positioned from LCR coordinates. Streets, the ward boundary and district areas are drawn underneath. Tapping a household shows its ministering connections and lets the user reassign it.
 
-Districts on the map are sets of households. The user assigns households to districts by tapping them. District boundaries are then drawn automatically around those households, and follow streets where streets separate them.
+Districts on the map are drawn shapes plus the households in them. The user draws each district's shape; households inside join it, and individual households can be tapped into another district as exceptions.
 
 The map sits alongside the existing board (canvas). Both views read and write the same data.
 
@@ -39,7 +39,7 @@ The work is split into phases. Each phase can be shipped and tested on its own. 
 | 3 | Flags and labels on the map: taxonomy, display, filters | 1 |
 | 4 | Reassign from the map; gaps and capacity panels | 1, 3 |
 | 5 | Streets: import (done) and editor (deferred) | 1 |
-| 6 | Ward boundary and districts: household membership, automatic boundaries | 4, 5 |
+| 6 | Ward boundary and districts: household membership, drawn district shapes | 4, 5 |
 | 7 | Later: board card warnings and other follow-ups | 6 |
 
 Phases 2, 3 and 5 depend only on Phase 1 and can be reordered at a checkpoint.
@@ -53,7 +53,7 @@ Phases 2, 3 and 5 depend only on Phase 1 and can be reordered at a checkpoint.
 | D3 | Stored coordinates are never changed for display, and marks are always drawn exactly at their location. Crowding is handled by leaving names out, never by moving marks. Households at the same point stack behind one square. |
 | D4 | Households and elders are matched to LCR by person UUID, not by name. |
 | D5 | A household's district is set directly (`households.district_id`). District areas on the map are worked out from that membership; they are never drawn by hand. |
-| D6 | District boundaries follow streets where streets separate households of different districts. Elsewhere they run halfway between neighboring homes. |
+| D6 | District boundaries are drawn by hand as shapes (changed from automatic street-following areas at the owner's request). Households inside a shape join its district; tapped exceptions are allowed. |
 | D7 | The ward boundary is the only area drawn by hand, with snapping. |
 | D8 | Connection lines appear only for the selected household. A full-web overlay is an optional toggle, off by default. |
 | D9 | Reassignments made on the map write to the same tables as the board, so they appear in the existing worklist and change tracking. |
@@ -308,7 +308,7 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
 
 ## Phase 5 — Streets
 
-**Goal:** streets for orientation, and as the edges district boundaries follow (D6).
+**Goal:** streets for orientation, and as edges district shapes snap to (D6).
 
 **Scope**
 1. **Import** (done). One-time download of road lines inside the ward boundary from OpenStreetMap (Overpass API), sending only the ward's map area (D12). Before a ward boundary exists, use the area around all households plus a margin. The import is simplified into `streets` rows:
@@ -342,35 +342,31 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
 1. **Ward boundary.** The starting outline is generated around all households with a margin, then edited by dragging corners. Corners snap to streets and to other corners. Stored in `wards.boundary`. This enables the `outside_ward` review items and flag.
 2. **District membership.** An Edit districts screen:
    - Pick a district; tap households to add them, tap again to remove.
-   - Lasso to move many households at once.
+   - Lasso draws the picked district's shape (see 3).
    - Shared-point boxes move as a unit.
    - "No district" is a valid choice.
    - Name editing and the district list come from the existing `districts` rows (D11).
    - An "If you save" panel lists each household whose district changes, and whether that creates or clears a "Ministered from another district" flag.
-3. **Automatic district areas (D6).** Steps:
-   1. Split the ward boundary into blocks using streets that cross it fully or connect to other streets. Dead-end streets don't split blocks.
-   2. A block whose households all belong to one district goes to that district. A block with no households goes to the district of the nearest household.
-   3. A block with households from more than one district is divided halfway between its households, staying inside the block.
-   4. Merge each district's pieces into one area. Draw a boundary line wherever two areas meet. Where that meets along a street, the line follows the street.
-   5. With no streets, fall back to dividing the whole ward halfway between neighboring homes.
-   6. Treat households with identical coordinates as one point.
-4. **Split-district warning.** If a district's area ends up in more than one piece, show a warning in the editor and on the map. It doesn't block saving.
-5. **Move-ins.** A household with no district gets a suggested district: the area its point falls in. The suggestion appears in the household popover and the review queue, and the user confirms it. (Whether to apply it automatically is a checkpoint question.) *As built:* only after the first membership save; listed under Locations → No district. Households without a district don't claim area, so the areas cover the ward with real districts only.
+3. **Drawn district shapes (D6).** Each district's shape is drawn by hand and stored in `districts.boundary` (GeoJSON MultiPolygon, migration 0008):
+   1. Pick a district, turn on Lasso, and click corners one at a time (pan and zoom freely between them). Click the first corner or press Enter to close; Backspace removes the last corner; Esc discards the shape.
+   2. A closed lasso adds its area to the picked district's shape and cuts it out of every other district's shape, so shapes never overlap. With "No district" picked, it erases.
+   3. The picked district's corners show as handles: drag to move (snapping to streets, the ward outline and other shapes' corners, so neighbours can share edges), "+" to add a corner, drop on a neighbouring corner to remove one.
+   4. Households follow a shape only where it changed: a household whose containing shape is different afterwards joins that district, or none. A household tapped into a district against the lines stays an exception until a shape edit crosses it.
+   5. Shapes are part of the editor's draft and saved with the household changes.
+4. *(Replaced.)* Shapes are drawn on purpose, so a district in several pieces is not flagged.
+5. **Move-ins.** A household with no district gets a suggested district: the drawn shape its point falls in. The suggestion appears in the household popover and the review queue, and the user confirms it. (Whether to apply it automatically is a checkpoint question.) *As built:* only after the first membership save; listed under Locations → No district.
 6. **Flags.** Turn on "Ministered from another district" and "Outside ward". Switch the districts panel to `households.district_id`. *As built:* outside-ward items are rechecked on every boundary save and location import. Square colour, the district pill, the district filter and the districts panel follow the household's own district; minister lines and the reassign list follow the companionship's. Status colours, highest first: no companionship, outside ward, another district (amber), far from ministers (now orange), location changed.
 7. **Initial membership.** On first use, set `households.district_id` from each household's companionship's district. Households without a companionship start with no district.
 
-**Geometry library.** Start the phase with a short spike comparing JSTS (noding plus polygonize) against a lighter mix (polygon-clipping plus custom splitting). Criteria: correctness on the real street network, bundle size, and speed. Recompute target: under 100 ms on each edit for about 200 households. Record the result here.
-
-*Spike result:* the lighter mix. `polygon-clipping` (0.15.7, about 10 KB minified and gzipped; JSTS is roughly 250 KB) merges each district's pieces, and a small custom planar graph (`src/map/blocks.ts`: noding, joining street ends within 3 m, pruning dead ends, face tracing) splits the ward into blocks. Fixture-ward unit tests cover blocks, assignment, mixed-block division, full coverage without overlaps, and split detection. On the real ward (99 streets, 178 households, generated outline) turning the areas on takes about 32 ms from click to painted frame.
+**Geometry.** `polygon-clipping` (0.15.7, about 10 KB gzipped) does the union and difference for drawn shapes, with corners rounded to the centimetre (unrounded input made its union throw on the real ward). *History:* the phase first built automatic areas (ward split into street blocks by a custom planar graph, blocks assigned by their households); the owner chose drawn shapes instead, and that code was removed.
 
 **Acceptance**
-- Every point inside the ward belongs to exactly one district area: no gaps, no overlaps. Covered by unit tests on a fixture ward.
-- A household change redraws the area live.
-- Boundaries follow streets wherever the two sides of a street belong to different districts.
-- Unit tests for block splitting, assigning blocks, dividing mixed blocks, and detecting split districts.
+- Shapes never overlap; drawing or editing one district's shape cuts it from the others. Covered by unit tests.
+- Only households whose containing shape changed move; exceptions stay.
+- Shapes round-trip through stored lat/lng within a centimetre.
 
 **Checkpoint 6**
-- Do the automatic boundaries look right on the real ward? Where don't they?
+- Is drawing shapes by hand quick enough for a full redraw of the ward?
 - Should move-ins get their suggested district automatically, or always need confirmation?
 - Should district membership be part of snapshots and change tracking? It's app-only data; LCR doesn't store household districts.
 - Should "Ministered from another district" also show on the board now, or wait for Phase 7?

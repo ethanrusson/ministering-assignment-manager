@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// The Edit districts controls (docs/ward-map-prd.md, Phase 6, step 2): pick a
-// district, tap or lasso households on the map, and see what saving changes.
+// The Edit districts controls (docs/ward-map-prd.md, Phase 6): pick a
+// district, draw its shape with the lasso or tap households, and see what
+// saving changes.
 
 export interface PanelDistrict {
   id: string | null;
@@ -23,8 +24,7 @@ const props = defineProps<{
   changes: PanelChange[];
   writes: number;
   initialized: boolean;
-  /** Districts whose area is in more than one piece. */
-  splitDistricts: string[];
+  shapesChanged: boolean;
   saving: boolean;
 }>();
 const emit = defineEmits<{
@@ -80,7 +80,7 @@ void props;
     <button
       type="button"
       class="rounded bg-blue-600 px-2 py-0.5 font-semibold disabled:opacity-50"
-      :disabled="!writes || saving"
+      :disabled="(!writes && !shapesChanged) || saving"
       @click="emit('save')"
     >
       Save{{ writes ? ` (${writes})` : '' }}
@@ -110,14 +110,6 @@ void props;
           />
         </div>
       </section>
-
-      <p
-        v-for="name in splitDistricts"
-        :key="name"
-        class="rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-800"
-      >
-        {{ name }} is in more than one piece.
-      </p>
 
       <section>
         <h3 class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">

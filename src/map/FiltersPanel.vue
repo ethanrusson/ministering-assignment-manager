@@ -20,8 +20,6 @@ const props = defineProps<{
   matchCount: number | null;
   showAreas: boolean;
   showAll: boolean;
-  /** Districts whose area is in more than one piece. */
-  splitDistricts: string[];
   /** Households per district id. */
   homeCounts: Map<string, number>;
 }>();
@@ -205,13 +203,6 @@ const districtRows = computed(() =>
             District areas
           </button>
         </div>
-        <p
-          v-for="name in showAreas ? splitDistricts : []"
-          :key="name"
-          class="mb-1 rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-800"
-        >
-          {{ name }} is in more than one piece.
-        </p>
         <table class="w-full text-xs">
           <thead class="text-stone-500">
             <tr>

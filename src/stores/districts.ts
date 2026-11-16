@@ -46,7 +46,10 @@ export const useDistrictsStore = defineStore('districts', () => {
     const { data, error } = await supabase
       .from('districts')
       .select('*')
-      .order('created_at');
+      // Imported districts share a created_at; name keeps their order (and
+      // so their D1/D2/D3 labels and colours) stable across updates.
+      .order('created_at')
+      .order('name');
     if (error) throw error;
     items.value = data ?? [];
     loaded.value = true;
@@ -81,7 +84,7 @@ export const useDistrictsStore = defineStore('districts', () => {
 
   async function update(
     id: string,
-    patch: Partial<Pick<District, 'name' | 'position_x' | 'position_y' | 'width' | 'height'>>,
+    patch: Partial<Pick<District, 'name' | 'position_x' | 'position_y' | 'width' | 'height' | 'boundary'>>,
   ) {
     const { data, error } = await supabase
       .from('districts')

@@ -34,7 +34,18 @@ import {
   snapCorner,
   toBoundary,
 } from './boundary';
-import { districtAreas, districtAt, NO_DISTRICT } from './districtAreas';
+import {
+  districtAt,
+  fromGeo,
+  fromRings,
+  movesBetween,
+  paint,
+  ringShape,
+  setShape,
+  shapeRings,
+  toGeo,
+  type Shapes,
+} from './districtShapes';
 import {
   assign,
   changesOf,
@@ -45,7 +56,6 @@ import {
   type MembershipHousehold,
 } from './districtEdit';
 import DistrictEditPanel, { type PanelChange, type PanelDistrict } from './DistrictEditPanel.vue';
-import { pointInRing } from './blocks';
 import type { MultiPolygon } from 'polygon-clipping';
 import { usePanZoom, ZOOM_STEP } from '@/canvas/usePanZoom';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
@@ -739,7 +749,7 @@ const streetLabels = computed(() =>
   ),
 );
 
-// ─── District areas (Phase 6 preview) ──────────────────────────────────────
+// ─── Ward outline and district shapes (Phase 6) ────────────────────────────
 
 const showAreas = ref(false);
 /** How far the generated ward outline sits outside the outermost homes, in meters. */
@@ -861,12 +871,35 @@ const membership = computed<MembershipHousehold[]>(() =>
 const membershipById = computed(() => new Map(membership.value.map((m) => [m.id, m])));
 const membershipInitialized = computed(() => isInitialized(membership.value));
 
+/** District key for households without a district. */
+const NO_DISTRICT = '';
+
 /** Edits not yet saved; null when not editing districts. */
 const districtDraft = ref<Draft | null>(null);
+/** Drawn district shapes as saved (districts.boundary), in meters. */
+const savedShapes = computed<Shapes>(() => {
+  const m: Shapes = new Map();
+  for (const d of districts.items) {
+    const shape = fromGeo(d.boundary, origin.value);
+    if (shape?.length) m.set(d.id, shape);
+  }
+  return m;
+});
+/** Shapes being edited; null when not editing districts. */
+const shapeDraft = ref<Shapes | null>(null);
+const shapes = computed(() => shapeDraft.value ?? savedShapes.value);
 const editingDistricts = computed(() => districtDraft.value !== null);
 const pickedDistrict = ref<string | null>(null);
+/** Lasso mode: corners placed one click at a time, in meters; closing it assigns the households inside. */
 const lasso = ref(false);
 const lassoPts = ref<MapPoint[]>([]);
+/** Where the next corner would go (mouse only), for the line to the cursor. */
+const lassoHover = ref<MapPoint | null>(null);
+watch(lasso, (on) => {
+  if (on) return;
+  lassoPts.value = [];
+  lassoHover.value = null;
+});
 const savingDistricts = ref(false);
 
 /** A household's district: the draft while editing, else saved (or its companionship's, before any save). */
@@ -878,6 +911,7 @@ function districtIdOf(householdId: string): string {
 
 function startDistrictEdit() {
   districtDraft.value = new Map();
+  shapeDraft.value = new Map(savedShapes.value);
   pickedDistrict.value = districts.items[0]?.id ?? null;
   lasso.value = false;
   selectedId.value = null;
@@ -919,20 +953,132 @@ function toggleStack(ids: string[]) {
   districtDraft.value = toggle(districtDraft.value!, ids, pickedDistrict.value, (id) => districtIdOf(id) || null);
 }
 
+/** A click within this many px of the first corner closes the lasso. */
+const LASSO_CLOSE_PX = 12;
+
+const toMeters = (s: Point): MapPoint => ({ x: (s.x - vp.tx) / vp.scale, y: (s.y - vp.ty) / vp.scale });
+
+function lassoClick(e: MouseEvent) {
+  const p = toMeters(local(e));
+  const first = lassoPts.value[0];
+  if (lassoPts.value.length >= 3 && distance(first, p) * vp.scale <= LASSO_CLOSE_PX) return finishLasso();
+  lassoPts.value = [...lassoPts.value, p];
+}
+
+/** Replaces the draft shapes; households whose containing shape changed follow it. */
+function applyShapes(after: Shapes) {
+  const points = groups.value.flatMap((g) => g.items.map((n) => ({ id: n.id, p: g.p })));
+  let draft = districtDraft.value!;
+  for (const m of movesBetween(points, shapes.value, after)) draft = assign(draft, [m.id], m.district);
+  districtDraft.value = draft;
+  shapeDraft.value = after;
+}
+
+/** Adds the lasso's area to the picked district (or erases it, for No district), then back to tapping. */
 function finishLasso() {
   const ring = lassoPts.value;
-  lassoPts.value = [];
+  lasso.value = false;
   if (ring.length < 3 || !districtDraft.value) return;
-  const ids = groups.value.filter((g) => pointInRing(placeOf(g), ring)).flatMap((g) => g.items.map((n) => n.id));
-  districtDraft.value = assign(districtDraft.value, ids, pickedDistrict.value);
+  applyShapes(paint(shapes.value, pickedDistrict.value, ringShape(ring)));
+}
+
+/** A corner of the picked district's shape being dragged. */
+const shapeDrag = ref<{ pi: number; ri: number; i: number; at: MapPoint; onCorner: number | null } | null>(null);
+
+/** The picked district's rings while editing, with a dragged corner applied. */
+const pickedRings = computed(() => {
+  const m = editingDistricts.value && !lasso.value && pickedDistrict.value ? shapes.value.get(pickedDistrict.value) : null;
+  if (!m) return [];
+  const rings = shapeRings(m);
+  const d = shapeDrag.value;
+  if (d) rings[d.pi][d.ri] = rings[d.pi][d.ri].map((p, k) => (k === d.i ? d.at : p));
+  return rings;
+});
+
+const shapeHandles = computed(() =>
+  pickedRings.value.flatMap((poly, pi) =>
+    poly.flatMap((ring, ri) =>
+      ring.map((p, i) => {
+        const q = ring[(i + 1) % ring.length];
+        return {
+          pi,
+          ri,
+          i,
+          x: p.x * vp.scale,
+          y: p.y * vp.scale,
+          midX: ((p.x + q.x) / 2) * vp.scale,
+          midY: ((p.y + q.y) / 2) * vp.scale,
+        };
+      }),
+    ),
+  ),
+);
+
+type ShapeHandle = (typeof shapeHandles.value)[number];
+
+function onShapeCornerDown(h: ShapeHandle, e: PointerEvent) {
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  shapeDrag.value = { pi: h.pi, ri: h.ri, i: h.i, at: pickedRings.value[h.pi][h.ri][h.i], onCorner: null };
+}
+
+function onShapeCornerMove(h: ShapeHandle, e: PointerEvent) {
+  const d = shapeDrag.value;
+  if (!d || d.pi !== h.pi || d.ri !== h.ri || d.i !== h.i) return;
+  const ring = shapeRings(shapes.value.get(pickedDistrict.value!)!)[h.pi][h.ri];
+  // Snap to this ring's other corners first (dropping on a neighbour removes
+  // the corner), then every other shape's corners and the ward outline, so
+  // neighbouring districts can share edges exactly.
+  const own = ring.filter((_, k) => k !== h.i);
+  const others = [...shapes.value.values()].flatMap((m) => shapeRings(m).flat(2)).concat(wardOutline.value);
+  const snap = snapCorner(worldAt(e), [...own, ...others], streetsWorld.value.map((st) => st.pts), SNAP_PX / vp.scale);
+  const onOwn = snap.onCorner !== null && snap.onCorner < own.length ? snap.onCorner : null;
+  shapeDrag.value = { ...d, at: snap.at, onCorner: onOwn === null ? null : onOwn < h.i ? onOwn : onOwn + 1 };
+}
+
+function onShapeCornerUp(h: ShapeHandle) {
+  const d = shapeDrag.value;
+  if (!d || d.pi !== h.pi || d.ri !== h.ri || d.i !== h.i) return;
+  shapeDrag.value = null;
+  const picked = pickedDistrict.value!;
+  const rings = shapeRings(shapes.value.get(picked)!);
+  rings[d.pi][d.ri] = moveCorner(rings[d.pi][d.ri], d.i, d.at, d.onCorner);
+  applyShapes(setShape(shapes.value, picked, fromRings(rings)));
+}
+
+function insertShapeCorner(h: ShapeHandle) {
+  const picked = pickedDistrict.value!;
+  const rings = shapeRings(shapes.value.get(picked)!);
+  rings[h.pi][h.ri] = insertCorner(rings[h.pi][h.ri], h.i);
+  shapeDraft.value = new Map(shapes.value).set(picked, fromRings(rings));
+}
+
+/** Districts whose drawn shape differs from the saved one. */
+const changedShapes = computed(() => {
+  const draft = shapeDraft.value;
+  if (!draft) return [];
+  const ids = new Set([...draft.keys(), ...savedShapes.value.keys()]);
+  return [...ids].filter(
+    (id) => JSON.stringify(draft.get(id) ?? null) !== JSON.stringify(savedShapes.value.get(id) ?? null),
+  );
+});
+
+function cancelDistrictEdit() {
+  districtDraft.value = null;
+  shapeDraft.value = null;
+  shapeDrag.value = null;
 }
 
 async function saveDistricts() {
   const writes = districtChanges.value.writes;
+  const draft = shapeDraft.value;
   savingDistricts.value = true;
   try {
     await households.setDistricts(writes);
-    districtDraft.value = null;
+    for (const id of changedShapes.value) {
+      const shape = draft?.get(id);
+      await districts.update(id, { boundary: shape ? toGeo(shape, origin.value) : null });
+    }
+    cancelDistrictEdit();
     pushInfo(`Saved districts for ${writes.length} ${writes.length === 1 ? 'household' : 'households'}.`);
   } catch (err) {
     pushError(err);
@@ -949,8 +1095,14 @@ async function renameDistrict(id: string, name: string) {
   }
 }
 
+const lassoPx = computed(() =>
+  [...lassoPts.value, ...(lassoHover.value ? [lassoHover.value] : [])].map((p) => ({
+    x: p.x * vp.scale,
+    y: p.y * vp.scale,
+  })),
+);
 const lassoPath = computed(() =>
-  lassoPts.value.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(''),
+  lassoPx.value.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(''),
 );
 
 /** Households with no district once memberships are saved (move-ins). */
@@ -958,27 +1110,12 @@ const withoutDistrict = computed(() =>
   membershipInitialized.value ? households.visible.filter((h) => !h.district_id).map((h) => h.id) : [],
 );
 
-/** Households without a district don't claim any area. */
-const areas = computed(() =>
-  showAreas.value || editingDistricts.value || withoutDistrict.value.length
-    ? districtAreas(
-        wardOutline.value,
-        streetsWorld.value.map((s) => s.pts),
-        groups.value.flatMap((g) =>
-          g.items
-            .map((n) => ({ p: g.p, district: districtIdOf(n.id) }))
-            .filter((n) => n.district !== NO_DISTRICT),
-        ),
-      )
-    : [],
-);
-
-/** A move-in's suggested district: the area its point falls in. */
+/** A move-in's suggested district: the drawn shape its point falls in. */
 const suggestedDistricts = computed(() => {
   const m = new Map<string, string>();
   for (const id of withoutDistrict.value) {
     const p = pointOf(id);
-    const d = p ? districtAt(areas.value, p) : null;
+    const d = p ? districtAt(savedShapes.value, p) : null;
     if (d) m.set(id, d);
   }
   return m;
@@ -1026,23 +1163,22 @@ function shapePath(shape: MultiPolygon, k: number): string {
     .join('');
 }
 
-const areaPaths = computed(() =>
-  areas.value.map((a) => {
-    const rank = districts.items.findIndex((d) => d.id === a.district);
-    return { key: a.district || 'none', family: districtFamily(rank), d: shapePath(a.shape, vp.scale) };
-  }),
-);
+/** Drawn shapes, with a corner being dragged shown where it is. */
+const areaPaths = computed(() => {
+  const m = new Map(shapes.value);
+  if (shapeDrag.value && pickedDistrict.value) m.set(pickedDistrict.value, fromRings(pickedRings.value));
+  return [...m].map(([id, shape]) => ({
+    key: id,
+    family: districtFamily(rankOfDistrict(id)),
+    picked: editingDistricts.value && id === pickedDistrict.value,
+    d: shapePath(shape, vp.scale),
+  }));
+});
 
 const outlinePath = computed(
   () =>
     wardOutline.value.map((p, i) => `${i ? 'L' : 'M'}${(p.x * vp.scale).toFixed(1)} ${(p.y * vp.scale).toFixed(1)}`).join('') +
     'Z',
-);
-
-const splitDistricts = computed(() =>
-  areas.value
-    .filter((a) => a.split && a.district)
-    .map((a) => districtName(a.district)),
 );
 
 const bar = computed(() => scaleBar(vp.scale));
@@ -1064,7 +1200,7 @@ function zoomBy(factor: number) {
  */
 function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) {
   if (editingBoundary.value) return;
-  if (editingDistricts.value) return toggleStack(tapped.items.map((n) => n.id));
+  if (editingDistricts.value) return lasso.value ? lassoClick(e) : toggleStack(tapped.items.map((n) => n.id));
   if (placing.value?.kind === 'household') return void placeHouseholdAt(e);
   const p = local(e);
   const x = p.x - vp.tx;
@@ -1131,6 +1267,9 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (lasso.value && lassoPts.value.length && e.pointerType === 'mouse' && !dragging) {
+    lassoHover.value = toMeters(local(e));
+  }
   if (!pointers.has(e.pointerId)) return;
   const p = local(e);
   pointers.set(e.pointerId, p);
@@ -1145,16 +1284,10 @@ function onPointerMove(e: PointerEvent) {
     return;
   }
   if (!dragStart || !dragLast) return;
-  const lassoing = editingDistricts.value && lasso.value;
   if (!dragging) {
     if (Math.hypot(p.x - dragStart.x, p.y - dragStart.y) < 4) return;
     dragging = true;
     root.value?.setPointerCapture(e.pointerId);
-    if (lassoing) lassoPts.value = [{ x: dragStart.x - vp.tx, y: dragStart.y - vp.ty }];
-  }
-  if (lassoing) {
-    lassoPts.value = [...lassoPts.value, { x: p.x - vp.tx, y: p.y - vp.ty }];
-    return;
   }
   panBy(p.x - dragLast.x, p.y - dragLast.y);
   dragLast = p;
@@ -1164,7 +1297,6 @@ function onPointerUp(e: PointerEvent) {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinchLast = null;
   if (pointers.size === 0) {
-    if (lassoPts.value.length) finishLasso();
     suppressClick = dragging;
     dragging = false;
     dragStart = dragLast = null;
@@ -1184,6 +1316,7 @@ function onBackgroundClick(e: MouseEvent) {
   const inside = e
     .composedPath()
     .some((el) => el instanceof HTMLElement && (el.hasAttribute('data-household') || el.hasAttribute('data-no-pan')));
+  if (!inside && editingDistricts.value && lasso.value) return lassoClick(e);
   if (inside || editingBoundary.value || editingDistricts.value) return;
   if (placing.value?.kind === 'household') void placeHouseholdAt(e);
   else if (placing.value) return;
@@ -1201,6 +1334,12 @@ function onWheel(e: WheelEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  const typing = e.target instanceof Element && !!e.target.closest('input, textarea');
+  if (lasso.value && lassoPts.value.length && !typing) {
+    if (e.key === 'Enter') return finishLasso();
+    if (e.key === 'Backspace') return void (lassoPts.value = lassoPts.value.slice(0, -1));
+    if (e.key === 'Escape') return void (lassoPts.value = []);
+  }
   if (e.key !== 'Escape') return;
   if (editingBoundary.value) boundaryDraft.value = null;
   else if (placing.value) placing.value = null;
@@ -1265,7 +1404,8 @@ onBeforeUnmount(() => {
             v-for="a in areaPaths"
             :key="a.key"
             :d="a.d"
-            :style="{ fill: v(a.family ? `${a.family}-100` : 'white'), stroke: v('stone-500') }"
+            :stroke-width="a.picked ? 2.5 : 1.5"
+            :style="{ fill: v(`${a.family}-100`), stroke: v(a.picked ? `${a.family}-600` : 'stone-500') }"
           />
         </g>
         <path
@@ -1330,13 +1470,23 @@ onBeforeUnmount(() => {
             stroke-dasharray="1 4"
           />
         </g>
-        <path
-          v-if="lassoPts.length"
-          :d="lassoPath + 'Z'"
-          stroke-width="1.5"
-          stroke-dasharray="4 3"
-          :style="{ stroke: v('stone-900'), fill: v('stone-500'), fillOpacity: 0.12 }"
-        />
+        <g v-if="lassoPts.length" :style="{ stroke: v('stone-900') }">
+          <path
+            :d="lassoPath + 'Z'"
+            stroke-width="1.5"
+            stroke-dasharray="4 3"
+            :style="{ fill: v('stone-500'), fillOpacity: 0.12 }"
+          />
+          <circle
+            v-for="(c, i) in lassoPx.slice(0, lassoPts.length)"
+            :key="i"
+            :cx="c.x"
+            :cy="c.y"
+            :r="i === 0 && lassoPts.length >= 3 ? 6 : 3.5"
+            stroke-width="1.5"
+            :style="{ fill: v('white') }"
+          />
+        </g>
         <g v-if="movedFrom" :style="{ stroke: v('stone-600'), fill: v('stone-600') }">
           <line
             :x1="movedFrom.x1"
@@ -1411,6 +1561,33 @@ onBeforeUnmount(() => {
           @pointermove="onCornerMove(i, $event)"
           @pointerup="onCornerUp(i)"
           @pointercancel="onCornerUp(i)"
+        />
+      </template>
+
+      <template v-if="shapeHandles.length">
+        <button
+          v-for="h in shapeHandles"
+          :key="`mid${h.pi}-${h.ri}-${h.i}`"
+          type="button"
+          data-no-pan
+          class="absolute z-10 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-blue-600 bg-white text-xs leading-none text-blue-700"
+          :style="{ left: `${h.midX}px`, top: `${h.midY}px` }"
+          aria-label="Add a corner here"
+          @click="insertShapeCorner(h)"
+        >
+          +
+        </button>
+        <span
+          v-for="h in shapeHandles"
+          :key="`corner${h.pi}-${h.ri}-${h.i}`"
+          data-no-pan
+          class="absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full border-2 border-white bg-blue-600 shadow"
+          style="touch-action: none"
+          :style="{ left: `${h.x}px`, top: `${h.y}px` }"
+          @pointerdown="onShapeCornerDown(h, $event)"
+          @pointermove="onShapeCornerMove(h, $event)"
+          @pointerup="onShapeCornerUp(h)"
+          @pointercancel="onShapeCornerUp(h)"
         />
       </template>
 
@@ -1636,11 +1813,11 @@ onBeforeUnmount(() => {
       :changes="panelChanges"
       :writes="districtChanges.writes.length"
       :initialized="membershipInitialized"
-      :split-districts="splitDistricts"
+      :shapes-changed="changedShapes.length > 0"
       :saving="savingDistricts"
       @pick="(id) => (pickedDistrict = id)"
       @rename="renameDistrict"
-      @cancel="districtDraft = null"
+      @cancel="cancelDistrictEdit"
       @save="saveDistricts"
     />
 
@@ -1674,7 +1851,6 @@ onBeforeUnmount(() => {
       v-model:color-by="colorBy"
       v-model:show-areas="showAreas"
       v-model:show-all="showAll"
-      :split-districts="splitDistricts"
       :home-counts="homeCounts"
       :match-count="matched ? matched.size : null"
       @close="panel = null"

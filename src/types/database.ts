@@ -3,6 +3,12 @@
 // Conforms to @supabase/postgrest-js GenericDatabase: each table needs
 // Row / Insert / Update / Relationships ([] is fine for v1).
 
+/** A drawn district shape: GeoJSON MultiPolygon in lat/lng (migration 0008). */
+export interface DistrictShapeGeo {
+  type: 'MultiPolygon';
+  coordinates: [number, number][][][];
+}
+
 export type Json =
   | string
   | number
@@ -215,6 +221,7 @@ export type Database = {
           position_y: number;
           width: number;
           height: number;
+          boundary: DistrictShapeGeo | null;
           created_at: string;
         };
         Insert: {
@@ -225,6 +232,7 @@ export type Database = {
           position_y?: number;
           width?: number;
           height?: number;
+          boundary?: DistrictShapeGeo | null;
           created_at?: string;
         };
         Update: {
@@ -235,6 +243,7 @@ export type Database = {
           position_y?: number;
           width?: number;
           height?: number;
+          boundary?: DistrictShapeGeo | null;
           created_at?: string;
         };
         Relationships: EmptyRel;

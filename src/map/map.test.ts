@@ -333,6 +333,7 @@ describe('map filters', () => {
   it('colors by the most pressing status', () => {
     expect(statusOf(['location_changed', 'no_companionship'])).toBe('no_companionship');
     expect(statusOf(['location_changed', 'far_from_ministers'])).toBe('far_from_ministers');
+    expect(statusOf(['far_from_ministers', 'other_district', 'outside_ward'])).toBe('outside_ward');
     expect(statusOf(['new_since_import'])).toBe('ok');
   });
 });

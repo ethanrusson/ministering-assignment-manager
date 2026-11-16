@@ -5,13 +5,13 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/auth';
 import { subscribeToTable } from '@/lib/realtime';
 import type { Database, Json } from '@/types/database';
-import type { MovedData, ReviewPlan } from '@/lib/lcr/reviews';
+import type { MovedData, OutsideData, ReviewPlan } from '@/lib/lcr/reviews';
 
 /** A review row, with `data` typed (the column is plain jsonb). */
 export type LocationReview = Omit<
   Database['public']['Tables']['location_reviews']['Row'],
   'data'
-> & { data: MovedData | Record<string, never> };
+> & { data: MovedData | OutsideData | Record<string, never> };
 
 export const useLocationReviewsStore = defineStore('locationReviews', () => {
   const items = ref<LocationReview[]>([]);

@@ -16,6 +16,11 @@ export function toBoundary(ring: Point[], origin: LatLng): WardBoundary {
   return { type: 'Polygon', coordinates: [[...coords, coords[0]]] };
 }
 
+/** The stored boundary's corners as lat/lng (the closing point dropped). */
+export function boundaryRing(b: WardBoundary): LatLng[] {
+  return b.coordinates[0].slice(0, -1).map(([lng, lat]) => ({ lat, lng }));
+}
+
 export function fromBoundary(b: WardBoundary, origin: LatLng): Point[] {
   return b.coordinates[0].slice(0, -1).map(([lng, lat]) => project({ lat, lng }, origin));
 }

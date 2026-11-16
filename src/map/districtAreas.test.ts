@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import polygonClipping, { type MultiPolygon } from 'polygon-clipping';
 import { splitIntoBlocks, signedArea } from './blocks';
-import { districtAreas, type DistrictArea } from './districtAreas';
+import { districtAreas, districtAt, type DistrictArea } from './districtAreas';
 
 // Fixture ward: a 300 m square. Two north–south streets (x = 100, 200) and one
 // east–west street (y = 150) cross it fully, making six 100 × 150 m blocks.
@@ -130,5 +130,17 @@ describe('districtAreas', () => {
     );
     expect(areaOf(areas.a.shape)).toBeCloseTo(45000, 0);
     expect(areaOf(areas.b.shape)).toBeCloseTo(45000, 0);
+  });
+});
+
+describe('districtAt', () => {
+  it('finds the area a point falls in', () => {
+    const areas = districtAreas(ward, grid, [
+      { p: P(50, 75), district: 'a' },
+      { p: P(50, 225), district: 'b' },
+    ]);
+    expect(districtAt(areas, P(250, 40))).toBe('a');
+    expect(districtAt(areas, P(250, 260))).toBe('b');
+    expect(districtAt(areas, P(400, 40))).toBeNull();
   });
 });

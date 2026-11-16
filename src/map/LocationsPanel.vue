@@ -13,18 +13,25 @@ import { pushError } from '@/lib/errorToast';
 import { distance, formatMiles, project } from './geo';
 import type { MovedData } from '@/lib/lcr/reviews';
 
+const props = defineProps<{
+  /** Households with no district, and the district their point falls in. */
+  moveIns: { id: string; name: string; district: string | null; districtName: string | null }[];
+}>();
+
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'focus', householdId: string): void;
   (e: 'place', householdId: string): void;
   (e: 'pickHome', elderId: string): void;
+  (e: 'editBoundary'): void;
+  (e: 'setDistrict', householdId: string, districtId: string): void;
 }>();
 
 const elders = useEldersStore();
 const households = useHouseholdsStore();
 const reviews = useLocationReviewsStore();
 
-const openFor = (kind: 'no_location' | 'moved') =>
+const openFor = (kind: 'no_location' | 'moved' | 'outside_ward') =>
   reviews.open.filter((r) => r.kind === kind && households.byId.get(r.household_id)?.hidden === false);
 
 const unplaced = computed(() =>
@@ -40,6 +47,16 @@ const moved = computed(() =>
     };
   }),
 );
+const outside = computed(() =>
+  openFor('outside_ward').map((r) => ({ review: r, name: households.byId.get(r.household_id)!.name })),
+);
+
+/** "Moved out": hide the household and close the item. */
+async function movedOut(reviewId: string, householdId: string) {
+  await households.update(householdId, { hidden: true });
+  await reviews.resolve(reviewId, 'moved out');
+}
+
 const homeless = computed(() => elders.visible.filter((e) => !e.home_household_id));
 
 async function run(action: () => Promise<void>) {
@@ -69,7 +86,10 @@ async function run(action: () => Promise<void>) {
     </header>
 
     <div class="flex-1 space-y-4 overflow-y-auto p-3">
-      <p v-if="!unplaced.length && !moved.length && !homeless.length" class="text-stone-500">
+      <p
+        v-if="!unplaced.length && !moved.length && !outside.length && !props.moveIns.length && !homeless.length"
+        class="text-stone-500"
+      >
         Nothing to review.
       </p>
 
@@ -117,6 +137,71 @@ async function run(action: () => Promise<void>) {
               @click="run(() => reviews.resolve(m.review.id, 'accepted'))"
             >
               Accept
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <section v-if="outside.length">
+        <h3 class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+          Outside ward ({{ outside.length }})
+        </h3>
+        <ul class="space-y-1.5">
+          <li v-for="o in outside" :key="o.review.id">
+            <button
+              type="button"
+              class="block w-full truncate text-left hover:underline"
+              @click="emit('focus', o.review.household_id)"
+            >
+              {{ o.name }}
+            </button>
+            <div class="mt-0.5 flex gap-1">
+              <button
+                type="button"
+                class="rounded border border-stone-300 px-2 py-0.5 text-xs hover:bg-stone-50"
+                @click="run(() => reviews.dismiss(o.review.id, 'kept'))"
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                class="rounded border border-stone-300 px-2 py-0.5 text-xs hover:bg-stone-50"
+                @click="emit('editBoundary')"
+              >
+                Adjust boundary
+              </button>
+              <button
+                type="button"
+                class="rounded px-1.5 py-0.5 text-xs text-stone-500 hover:bg-stone-100"
+                @click="run(() => movedOut(o.review.id, o.review.household_id))"
+              >
+                Moved out
+              </button>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <section v-if="props.moveIns.length">
+        <h3 class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+          No district ({{ props.moveIns.length }})
+        </h3>
+        <ul class="space-y-1">
+          <li v-for="m in props.moveIns" :key="m.id" class="flex items-center gap-2">
+            <button
+              type="button"
+              class="min-w-0 flex-1 truncate text-left hover:underline"
+              @click="emit('focus', m.id)"
+            >
+              {{ m.name }}
+            </button>
+            <button
+              v-if="m.district"
+              type="button"
+              class="shrink-0 rounded border border-stone-300 px-2 py-0.5 text-xs hover:bg-stone-50"
+              @click="emit('setDistrict', m.id, m.district)"
+            >
+              Add to {{ m.districtName }}
             </button>
           </li>
         </ul>

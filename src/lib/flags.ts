@@ -1,9 +1,10 @@
-// Flags: issues the app detects from the data (docs/ward-map-prd.md, Phase 3).
-// Never edited directly; a flag goes away when its data changes, and "far from
-// ministers" can also be acknowledged. Pure, like validation.ts beside it.
+// Flags: issues the app detects from the data (docs/ward-map-prd.md, Phases 3
+// and 6). Never edited directly; a flag goes away when its data changes, and
+// "far from ministers" and "ministered from another district" can also be
+// acknowledged. Pure, like validation.ts beside it.
 //
-// Not here yet: "Ministered from another district" and "Outside ward" need
-// household districts and the ward boundary (Phase 6).
+// "Ministered from another district" needs households to have districts
+// (Phase 6), and "Outside ward" needs a saved ward boundary.
 
 import { distance, project, type LatLng } from '@/map/geo';
 
@@ -12,7 +13,9 @@ export type HouseholdFlag =
   | 'far_from_ministers'
   | 'no_location'
   | 'location_changed'
-  | 'new_since_import';
+  | 'new_since_import'
+  | 'other_district'
+  | 'outside_ward';
 
 export type ElderFlag = 'no_companionship' | 'not_generally_assigned' | 'new_since_import';
 
@@ -25,6 +28,8 @@ export const HOUSEHOLD_FLAG_LABELS: Record<HouseholdFlag, string> = {
   no_location: 'No location',
   location_changed: 'Location changed',
   new_since_import: 'New since last import',
+  other_district: 'Ministered from another district',
+  outside_ward: 'Outside ward',
 };
 
 export const ELDER_FLAG_LABELS: Record<ElderFlag, string> = {
@@ -39,6 +44,8 @@ export interface FlagHousehold {
   lng: number | null;
   lcrUuid: string | null;
   createdAt: string;
+  /** households.district_id; null when it has none. */
+  districtId: string | null;
 }
 
 export interface FlagElder {
@@ -60,6 +67,10 @@ export interface FlagInput {
   /** When the most recent ministering import ran, if any. */
   lastImportAt: string | null;
   acknowledgements: { householdId: string; flag: string; companionshipId: string }[];
+  /** Companionship id → its district id. */
+  districtOfCompanionship: Map<string, string | null>;
+  /** The saved ward boundary, if any. */
+  boundary: LatLng[] | null;
 }
 
 export interface Flags {
@@ -76,6 +87,10 @@ export function computeFlags(input: FlagInput): Flags {
   for (const e of input.elders) if (e.homeHouseholdId) homeOf.set(e.id, e.homeHouseholdId);
   const isNew = (r: { lcrUuid: string | null; createdAt: string }) =>
     !!input.lastImportAt && !!r.lcrUuid && r.createdAt >= input.lastImportAt;
+  const acked = (householdId: string, flag: string, comp: string) =>
+    input.acknowledgements.some(
+      (a) => a.householdId === householdId && a.flag === flag && a.companionshipId === comp,
+    );
 
   const households = new Map<string, HouseholdFlag[]>();
   for (const h of input.households) {
@@ -86,11 +101,15 @@ export function computeFlags(input: FlagInput): Flags {
     if (!here) flags.push('no_location');
     if (comp && here) {
       const far = distanceToMinisters(here, comp, input, homeOf, located);
-      const acked = input.acknowledgements.some(
-        (a) => a.householdId === h.id && a.flag === 'far_from_ministers' && a.companionshipId === comp,
-      );
-      if (far !== null && far > FAR_FROM_MINISTERS_M && !acked) flags.push('far_from_ministers');
+      if (far !== null && far > FAR_FROM_MINISTERS_M && !acked(h.id, 'far_from_ministers', comp)) {
+        flags.push('far_from_ministers');
+      }
     }
+    const compDistrict = comp ? input.districtOfCompanionship.get(comp) : null;
+    if (comp && h.districtId && compDistrict && h.districtId !== compDistrict && !acked(h.id, 'other_district', comp)) {
+      flags.push('other_district');
+    }
+    if (here && input.boundary && !insidePolygon(here, input.boundary)) flags.push('outside_ward');
     if (input.movedHouseholdIds.has(h.id)) flags.push('location_changed');
     if (isNew(h)) flags.push('new_since_import');
     if (flags.length) households.set(h.id, flags);
@@ -106,6 +125,19 @@ export function computeFlags(input: FlagInput): Flags {
   }
 
   return { households, elders };
+}
+
+/** Ray casting on lat/lng, which is fine at ward scale. */
+export function insidePolygon(p: LatLng, ring: LatLng[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (a.lat > p.lat !== b.lat > p.lat && p.lng < ((b.lng - a.lng) * (p.lat - a.lat)) / (b.lat - a.lat) + a.lng) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 /** The midpoint of a companionship's ministers' homes; null if none is located. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planReviews, type ExistingReview, type ReviewHousehold } from './reviews';
+import { planOutsideWard, planReviews, type ExistingReview, type ReviewHousehold } from './reviews';
 
 // 0.001° of latitude is about 110 m; 0.0002° about 22 m.
 const hh = (id: string, lat: number | null, source: ReviewHousehold['source'] = 'lcr') => ({
@@ -84,5 +84,52 @@ describe('planReviews', () => {
     expect(plan.manualReplaced).toEqual(['b']);
     // A hand placement isn't an LCR move.
     expect(plan.insert).toEqual([]);
+  });
+});
+
+describe('planOutsideWard', () => {
+  const boundary = [
+    { lat: -1, lng: -1 },
+    { lat: -1, lng: 1 },
+    { lat: 1, lng: 1 },
+    { lat: 1, lng: -1 },
+  ];
+  const at = (lat: number) => ({ lat, lng: 0 });
+
+  it('flags a location outside the boundary once', () => {
+    const plan = planOutsideWard({ households: [{ id: 'a', at: at(2) }, { id: 'b', at: at(0) }], boundary, reviews: [] });
+    expect(plan.insert).toEqual([{ householdId: 'a', kind: 'outside_ward', data: { at: at(2) } }]);
+    const again = planOutsideWard({
+      households: [{ id: 'a', at: at(2) }],
+      boundary,
+      reviews: [review('r', 'a', 'outside_ward', 'open', { at: at(2) })],
+    });
+    expect(again.insert).toEqual([]);
+  });
+
+  it('keeps a dismissed item dismissed until the household moves', () => {
+    const reviews = [review('r', 'a', 'outside_ward', 'dismissed', { at: at(2) })];
+    expect(planOutsideWard({ households: [{ id: 'a', at: at(2) }], boundary, reviews }).insert).toEqual([]);
+    expect(planOutsideWard({ households: [{ id: 'a', at: at(3) }], boundary, reviews }).insert).toHaveLength(1);
+  });
+
+  it('resolves an open item once the household is inside', () => {
+    const plan = planOutsideWard({
+      households: [{ id: 'a', at: at(0) }],
+      boundary,
+      reviews: [review('r', 'a', 'outside_ward', 'open', { at: at(2) })],
+    });
+    expect(plan.resolve).toEqual([{ id: 'r', resolution: 'inside' }]);
+  });
+
+  it('runs inside a location import against the new positions', () => {
+    const plan = planReviews({
+      households: [hh('a', 0)],
+      updates: [{ id: 'a', lat: 2, lng: 0 }],
+      noLcrLocation: [],
+      reviews: [],
+      boundary,
+    });
+    expect(plan.insert.map((r) => r.kind)).toEqual(['moved', 'outside_ward']);
   });
 });

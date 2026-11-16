@@ -68,6 +68,13 @@ export function districtAreas(
   });
 }
 
+/** The district whose area contains `p`, if any (a move-in's suggested district). */
+export function districtAt(areas: DistrictArea[], p: Point): string | null {
+  const inRing = (ring: [number, number][]) => pointInRing(p, ring.slice(0, -1).map(([x, y]) => ({ x, y })));
+  const hit = areas.find((a) => a.shape.some(([outer, ...holes]) => inRing(outer) && !holes.some(inRing)));
+  return hit?.district ?? null;
+}
+
 /** One site per point; a point shared by households in several districts keeps the first. */
 function uniqueSites(households: AreaHousehold[]): AreaHousehold[] {
   const seen = new Map<string, AreaHousehold>();

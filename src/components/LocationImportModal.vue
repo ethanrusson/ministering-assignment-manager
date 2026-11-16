@@ -4,6 +4,8 @@ import { parseDirectory } from '@/lib/lcr/directory';
 import { planLocationImport, type LocationPlan } from '@/lib/lcr/locations';
 import { MOVED_THRESHOLD_M, planReviews, type ReviewPlan } from '@/lib/lcr/reviews';
 import { useLocationReviewsStore } from '@/stores/locationReviews';
+import { useAuthStore } from '@/stores/auth';
+import { boundaryRing } from '@/map/boundary';
 import { useEldersStore } from '@/stores/elders';
 import { useHouseholdsStore } from '@/stores/households';
 
@@ -13,6 +15,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const elders = useEldersStore();
 const households = useHouseholdsStore();
 const reviews = useLocationReviewsStore();
+const auth = useAuthStore();
 
 const text = ref('');
 const found = ref(0);
@@ -71,6 +74,7 @@ function preview() {
       })),
       updates: plan.value.locationUpdates,
       noLcrLocation: [...plan.value.noLocation, ...plan.value.notInDirectory].map((h) => h.id),
+      boundary: auth.wardBoundary ? boundaryRing(auth.wardBoundary) : null,
       reviews: reviews.items.map((r) => ({
         id: r.id,
         householdId: r.household_id,

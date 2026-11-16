@@ -21,9 +21,11 @@ import { pushError, pushInfo } from '@/lib/errorToast';
 import type { Point as MapPoint } from './geo';
 import { applyAssignment, type Destination } from '@/lib/assignment';
 import { companionshipTitle, HOUSEHOLD_LIMIT } from '@/lib/validation';
-import { ministersHub } from '@/lib/flags';
+import { HOUSEHOLD_FLAG_LABELS, ministersHub } from '@/lib/flags';
+import type { AcknowledgeableFlag } from '@/types/database';
 import { reassignOptions } from './reassign';
 import {
+  boundaryRing,
   fromBoundary,
   insertCorner,
   moveCorner,
@@ -32,7 +34,7 @@ import {
   snapCorner,
   toBoundary,
 } from './boundary';
-import { districtAreas, NO_DISTRICT } from './districtAreas';
+import { districtAreas, districtAt, NO_DISTRICT } from './districtAreas';
 import {
   assign,
   changesOf,
@@ -87,7 +89,7 @@ import {
   type MapFilters,
 } from './mapFilters';
 import { useLocationReviewsStore } from '@/stores/locationReviews';
-import type { MovedData } from '@/lib/lcr/reviews';
+import { planOutsideWard, type MovedData } from '@/lib/lcr/reviews';
 
 /** Zoom limits in screen px per meter: about 200 km across down to 100 m. */
 const MIN_SCALE = 0.005;
@@ -147,11 +149,18 @@ const model = computed<MinisteringModel>(() => {
   };
 });
 
-/** Rank of the district a household's companionship sits in; -1 for none. */
+const rankOfDistrict = (id: string | null | undefined) =>
+  id ? districts.items.findIndex((d) => d.id === id) : -1;
+
+/** Rank of the district a household is in (D5); -1 for none. */
 function districtRankOf(householdId: string): number {
+  return rankOfDistrict(districtIdOf(householdId));
+}
+
+/** Rank of the district its companionship sits in; -1 for none. */
+function companionshipDistrictRankOf(householdId: string): number {
   const compId = companionships.companionshipForHousehold.get(householdId);
-  const districtId = compId ? companionships.byId.get(compId)?.district_id : null;
-  return districtId ? districts.items.findIndex((d) => d.id === districtId) : -1;
+  return rankOfDistrict(compId ? companionships.byId.get(compId)?.district_id : null);
 }
 
 // ─── Coloring and filters (Phase 3) ────────────────────────────────────────
@@ -179,8 +188,7 @@ const matched = computed(() => {
 
 function paintFor(householdId: string): Mark['paint'] {
   if (editingDistricts.value) {
-    const id = districtIdOf(householdId);
-    const f = districtFamily(id ? districts.items.findIndex((d) => d.id === id) : -1);
+    const f = districtFamily(districtRankOf(householdId));
     return f ? { fill: v(`${f}-200`), border: v(`${f}-600`) } : { fill: v('white'), border: v('stone-400') };
   }
   if (colorBy.value === 'district') return undefined;
@@ -339,7 +347,7 @@ const paths = computed(() => ({
 }));
 
 const ministerColor = computed(() => {
-  const f = selectedId.value ? districtFamily(districtRankOf(selectedId.value)) : null;
+  const f = selectedId.value ? districtFamily(companionshipDistrictRankOf(selectedId.value)) : null;
   return v(f ? `${f}-500` : 'stone-700');
 });
 
@@ -366,6 +374,7 @@ const popover = computed(() => {
 
   const rank = districtRankOf(id);
   const family = districtFamily(rank);
+  const compRank = companionshipDistrictRankOf(id);
   const compId = companionships.companionshipForHousehold.get(id);
   const ministers = compId ? (companionships.eldersInCompanionship.get(compId) ?? []) : [];
   const homes = ministers
@@ -415,7 +424,7 @@ const popover = computed(() => {
 
   return {
     name: h.name,
-    district: rank < 0 ? null : `${districtLabel(rank)} · ${districts.items[rank].name}`,
+    district: rank < 0 ? null : districtName(districts.items[rank].id),
     family,
     labels: households
       .shownLabelsFor(id)
@@ -423,15 +432,18 @@ const popover = computed(() => {
       .filter((l) => !!l),
     flags: flags.value.households.get(id) ?? [],
     companionshipId: compId ?? null,
-    farAck: compId
-      ? (acks.items.find(
-          (a) => a.household_id === id && a.flag === 'far_from_ministers' && a.companionship_id === compId,
-        ) ?? null)
-      : null,
+    warnings: ACK_WARNINGS.map((w) => ({
+      ...w,
+      on: (flags.value.households.get(id) ?? []).includes(w.flag),
+      ack: compId
+        ? (acks.items.find((a) => a.household_id === id && a.flag === w.flag && a.companionship_id === compId) ?? null)
+        : null,
+    })).filter((w) => w.on || w.ack),
+    suggestedDistrict: suggestedDistricts.value.get(id) ?? null,
     note: h.note ?? '',
     ministeredBy: joinNames(ministers.map(elderName)),
     ministeredDetail: [
-      rank < 0 ? null : districtLabel(rank),
+      compRank < 0 ? null : districtLabel(compRank),
       hub ? `${formatMiles(distance(hub, g.p))} away` : null,
       `${count} ${count === 1 ? 'household' : 'households'}`,
     ]
@@ -453,7 +465,7 @@ function select(id: string) {
   selectedId.value = id;
   editingLabels.value = false;
   reassigning.value = false;
-  acknowledging.value = false;
+  acknowledging.value = null;
 }
 
 const editingLabels = ref(false);
@@ -484,8 +496,7 @@ const reassignRows = computed(() => {
     hub: ministersHub(c.id, companionships.eldersInCompanionship, model.value.homeOf, locatedLatLng.value),
   }));
   return reassignOptions(locatedLatLng.value.get(id) ?? null, candidates, current).map((o) => {
-    const districtId = companionships.byId.get(o.id)?.district_id;
-    const rank = districtId ? districts.items.findIndex((d) => d.id === districtId) : -1;
+    const rank = rankOfDistrict(companionships.byId.get(o.id)?.district_id);
     const count = (companionships.householdsInCompanionship.get(o.id)?.length ?? 0) + (o.current ? 0 : 1);
     return {
       ...o,
@@ -521,16 +532,34 @@ function focusForReassign(id: string) {
   focusHousehold(id);
   reassigning.value = true;
 }
-/** The "far from ministers" acknowledgement form is open, with its optional note. */
-const acknowledging = ref(false);
+/** Popover warnings that can be acknowledged for the current companionship. */
+const ACK_WARNINGS: { flag: AcknowledgeableFlag; text: string; tint: string; input: string; button: string }[] = [
+  {
+    flag: 'other_district',
+    text: 'Ministered from another district.',
+    tint: 'bg-amber-100 text-amber-800',
+    input: 'border-amber-300',
+    button: 'bg-amber-600',
+  },
+  {
+    flag: 'far_from_ministers',
+    text: 'More than 0.5 mi from their ministers.',
+    tint: 'bg-orange-100 text-orange-800',
+    input: 'border-orange-300',
+    button: 'bg-orange-600',
+  },
+];
+
+/** The flag whose acknowledgement form is open, with its optional note. */
+const acknowledging = ref<AcknowledgeableFlag | null>(null);
 const ackNote = ref('');
 
-async function acknowledgeFar() {
+async function acknowledge(flag: AcknowledgeableFlag) {
   const p = popover.value;
   if (!p?.companionshipId || !selectedId.value) return;
   try {
-    await acks.acknowledge(selectedId.value, 'far_from_ministers', p.companionshipId, ackNote.value.trim() || null);
-    acknowledging.value = false;
+    await acks.acknowledge(selectedId.value, flag, p.companionshipId, ackNote.value.trim() || null);
+    acknowledging.value = null;
     ackNote.value = '';
   } catch (err) {
     pushError(err);
@@ -590,7 +619,8 @@ const locationsOpen = ref(false);
 const locationsCount = computed(
   () =>
     reviews.open.filter((r) => households.byId.get(r.household_id)?.hidden === false).length +
-    elders.visible.filter((e) => !e.home_household_id).length,
+    elders.visible.filter((e) => !e.home_household_id).length +
+    withoutDistrict.value.length,
 );
 
 /** Waiting for a tap: where a household lives, or which household an elder lives in. */
@@ -717,9 +747,30 @@ function resetBoundary() {
 async function saveBoundary() {
   if (!boundaryDraft.value) return;
   try {
-    await auth.updateWardBoundary(toBoundary(boundaryDraft.value, origin.value));
+    const boundary = toBoundary(boundaryDraft.value, origin.value);
+    await auth.updateWardBoundary(boundary);
     boundaryDraft.value = null;
-    pushInfo('Ward boundary saved.');
+    // Recheck who falls outside the new boundary (Locations → Outside ward).
+    const plan = planOutsideWard({
+      households: households.visible.map((h) => ({
+        id: h.id,
+        at: h.lat !== null && h.lng !== null ? { lat: h.lat, lng: h.lng } : null,
+      })),
+      boundary: boundaryRing(boundary),
+      reviews: reviews.items.map((r) => ({
+        id: r.id,
+        householdId: r.household_id,
+        kind: r.kind,
+        status: r.status,
+        data: r.data,
+      })),
+    });
+    await reviews.apply(plan);
+    pushInfo(
+      plan.insert.length
+        ? `Ward boundary saved. ${plan.insert.length} outside it (see Locations).`
+        : 'Ward boundary saved.',
+    );
   } catch (err) {
     pushError(err);
   }
@@ -873,15 +924,68 @@ const lassoPath = computed(() =>
   lassoPts.value.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(''),
 );
 
+/** Households with no district once memberships are saved (move-ins). */
+const withoutDistrict = computed(() =>
+  membershipInitialized.value ? households.visible.filter((h) => !h.district_id).map((h) => h.id) : [],
+);
+
+/** Households without a district don't claim any area. */
 const areas = computed(() =>
-  showAreas.value || editingDistricts.value
+  showAreas.value || editingDistricts.value || withoutDistrict.value.length
     ? districtAreas(
         wardOutline.value,
         streetsWorld.value.map((s) => s.pts),
-        groups.value.flatMap((g) => g.items.map((n) => ({ p: g.p, district: districtIdOf(n.id) }))),
+        groups.value.flatMap((g) =>
+          g.items
+            .map((n) => ({ p: g.p, district: districtIdOf(n.id) }))
+            .filter((n) => n.district !== NO_DISTRICT),
+        ),
       )
     : [],
 );
+
+/** A move-in's suggested district: the area its point falls in. */
+const suggestedDistricts = computed(() => {
+  const m = new Map<string, string>();
+  for (const id of withoutDistrict.value) {
+    const p = pointOf(id);
+    const d = p ? districtAt(areas.value, p) : null;
+    if (d) m.set(id, d);
+  }
+  return m;
+});
+
+/** "D2 · Name". */
+function districtName(id: string): string {
+  const rank = rankOfDistrict(id);
+  return rank < 0 ? '' : `${districtLabel(rank)} · ${districts.items[rank].name}`;
+}
+
+/** Locations → No district: each move-in with its suggestion, if any. */
+const moveIns = computed(() =>
+  withoutDistrict.value.map((id) => {
+    const d = suggestedDistricts.value.get(id) ?? null;
+    return { id, name: households.byId.get(id)?.name ?? '', district: d, districtName: d ? districtName(d) : null };
+  }),
+);
+
+/** Households per district, as the map colors them. */
+const homeCounts = computed(() => {
+  const m = new Map<string, number>();
+  for (const h of households.visible) {
+    const d = districtIdOf(h.id);
+    if (d) m.set(d, (m.get(d) ?? 0) + 1);
+  }
+  return m;
+});
+
+async function setDistrict(householdId: string, district: string) {
+  try {
+    await households.setDistricts([{ id: householdId, district }]);
+  } catch (err) {
+    pushError(err);
+  }
+}
 
 function shapePath(shape: MultiPolygon, k: number): string {
   return shape
@@ -909,10 +1013,7 @@ const outlinePath = computed(
 const splitDistricts = computed(() =>
   areas.value
     .filter((a) => a.split && a.district)
-    .map((a) => {
-      const rank = districts.items.findIndex((d) => d.id === a.district);
-      return `${districtLabel(rank)} · ${districts.items[rank]?.name ?? ''}`;
-    }),
+    .map((a) => districtName(a.district)),
 );
 
 const bar = computed(() => scaleBar(vp.scale));
@@ -1342,38 +1443,55 @@ onBeforeUnmount(() => {
           No companionship assigned.
         </div>
         <div
-          v-if="popover.flags.includes('far_from_ministers')"
-          class="space-y-1.5 rounded-md bg-amber-100 px-2 py-1.5 text-xs text-amber-800"
+          v-if="popover.flags.includes('outside_ward')"
+          class="rounded-md bg-red-100 px-2 py-1.5 text-xs text-red-800"
         >
-          <div class="flex items-center gap-2">
-            <span class="flex-1">More than 0.5 mi from their ministers.</span>
-            <button
-              v-if="!acknowledging"
-              type="button"
-              class="font-semibold underline"
-              @click="acknowledging = true"
-            >
-              Acknowledge
-            </button>
-          </div>
-          <form v-if="acknowledging" class="flex gap-1" @submit.prevent="acknowledgeFar">
-            <input
-              v-model="ackNote"
-              placeholder="Note (optional)"
-              class="min-w-0 flex-1 rounded border border-amber-300 bg-white px-1.5 py-0.5 text-stone-900"
-            />
-            <button type="submit" class="rounded bg-amber-600 px-2 text-white">OK</button>
-          </form>
+          Outside the ward boundary (see Locations).
         </div>
+        <template v-for="w in popover.warnings" :key="w.flag">
+          <div v-if="w.on" class="space-y-1.5 rounded-md px-2 py-1.5 text-xs" :class="w.tint">
+            <div class="flex items-center gap-2">
+              <span class="flex-1">{{ w.text }}</span>
+              <button
+                v-if="acknowledging !== w.flag"
+                type="button"
+                class="font-semibold underline"
+                @click="acknowledging = w.flag"
+              >
+                Acknowledge
+              </button>
+            </div>
+            <form v-if="acknowledging === w.flag" class="flex gap-1" @submit.prevent="acknowledge(w.flag)">
+              <input
+                v-model="ackNote"
+                placeholder="Note (optional)"
+                class="min-w-0 flex-1 rounded border bg-white px-1.5 py-0.5 text-stone-900"
+                :class="w.input"
+              />
+              <button type="submit" class="rounded px-2 text-white" :class="w.button">OK</button>
+            </form>
+          </div>
+          <div
+            v-else-if="w.ack"
+            class="flex items-center gap-2 rounded-md bg-stone-100 px-2 py-1.5 text-xs text-stone-600"
+          >
+            <span class="flex-1">
+              {{ HOUSEHOLD_FLAG_LABELS[w.flag] }}, acknowledged{{ w.ack.note ? `: ${w.ack.note}` : '.' }}
+            </span>
+            <button type="button" class="underline" @click="acks.remove(w.ack.id).catch(pushError)">Undo</button>
+          </div>
+        </template>
         <div
-          v-else-if="popover.farAck"
+          v-if="popover.suggestedDistrict"
           class="flex items-center gap-2 rounded-md bg-stone-100 px-2 py-1.5 text-xs text-stone-600"
         >
-          <span class="flex-1">
-            Far from ministers, acknowledged{{ popover.farAck.note ? `: ${popover.farAck.note}` : '.' }}
-          </span>
-          <button type="button" class="underline" @click="acks.remove(popover.farAck.id).catch(pushError)">
-            Undo
+          <span class="flex-1">No district yet. Suggested: {{ districtName(popover.suggestedDistrict) }}.</span>
+          <button
+            type="button"
+            class="font-semibold underline"
+            @click="setDistrict(selectedId!, popover.suggestedDistrict)"
+          >
+            Add
           </button>
         </div>
         <div
@@ -1526,6 +1644,7 @@ onBeforeUnmount(() => {
       v-model:color-by="colorBy"
       v-model:show-areas="showAreas"
       :split-districts="splitDistricts"
+      :home-counts="homeCounts"
       :flags="flags"
       :match-count="matched ? matched.size : null"
       @close="filtersOpen = false"
@@ -1536,10 +1655,13 @@ onBeforeUnmount(() => {
 
     <LocationsPanel
       v-if="locationsOpen"
+      :move-ins="moveIns"
       @close="locationsOpen = false"
       @focus="focusHousehold"
       @place="(id) => startPlacing('household', id)"
       @pick-home="(id) => startPlacing('elder', id)"
+      @edit-boundary="startBoundaryEdit"
+      @set-district="setDistrict"
     />
 
     <div

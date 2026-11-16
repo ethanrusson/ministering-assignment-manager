@@ -9,6 +9,8 @@ import { useFlagAcknowledgementsStore } from '@/stores/flagAcknowledgements';
 import { useHouseholdsStore } from '@/stores/households';
 import { useLcrImportsStore } from '@/stores/lcrImports';
 import { useLocationReviewsStore } from '@/stores/locationReviews';
+import { useAuthStore } from '@/stores/auth';
+import { boundaryRing } from '@/map/boundary';
 
 export function useFlags() {
   const households = useHouseholdsStore();
@@ -17,6 +19,7 @@ export function useFlags() {
   const reviews = useLocationReviewsStore();
   const acks = useFlagAcknowledgementsStore();
   const imports = useLcrImportsStore();
+  const auth = useAuthStore();
 
   return computed(() =>
     computeFlags({
@@ -26,6 +29,7 @@ export function useFlags() {
         lng: h.lng,
         lcrUuid: h.lcr_uuid,
         createdAt: h.created_at,
+        districtId: h.district_id,
       })),
       elders: elders.visible.map((e) => ({
         id: e.id,
@@ -41,6 +45,8 @@ export function useFlags() {
         reviews.open.filter((r) => r.kind === 'moved').map((r) => r.household_id),
       ),
       lastImportAt: imports.lastAt,
+      districtOfCompanionship: new Map(companionships.items.map((c) => [c.id, c.district_id])),
+      boundary: auth.wardBoundary ? boundaryRing(auth.wardBoundary) : null,
       acknowledgements: acks.items.map((a) => ({
         householdId: a.household_id,
         flag: a.flag,

@@ -31,6 +31,8 @@ const props = defineProps<{
   showAreas: boolean;
   /** Districts whose area is in more than one piece. */
   splitDistricts: string[];
+  /** Households per district id. */
+  homeCounts: Map<string, number>;
 }>();
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -94,21 +96,11 @@ const elderGaps = computed(() =>
     .filter((g) => g.items.length),
 );
 
-/**
- * Per district: households (by their companionship's district until Phase 6),
- * companionships, and slots at HOUSEHOLD_LIMIT each.
- */
+/** Per district: its households, companionships, and slots at HOUSEHOLD_LIMIT each. */
 const districtRows = computed(() =>
   districts.items.map((d, i) => {
     const comps = companionships.items.filter((c) => c.district_id === d.id);
-    const homes = comps.reduce(
-      (n, c) =>
-        n +
-        (companionships.householdsInCompanionship.get(c.id) ?? []).filter(
-          (h) => households.byId.get(h)?.hidden === false,
-        ).length,
-      0,
-    );
+    const homes = props.homeCounts.get(d.id) ?? 0;
     const slots = comps.length * HOUSEHOLD_LIMIT;
     return { id: d.id, label: `${districtLabel(i)} · ${d.name}`, family: districtFamily(i), homes, comps: comps.length, slots, open: slots - homes };
   }),

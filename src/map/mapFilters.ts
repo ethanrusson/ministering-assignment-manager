@@ -38,13 +38,15 @@ export interface Paint {
 /** "Color by status": the most pressing flag wins. */
 export const STATUS_PAINT = {
   no_companionship: { fill: 'white', border: 'red-600', label: 'No companionship' },
-  far_from_ministers: { fill: 'amber-200', border: 'amber-600', label: 'Far from ministers' },
+  outside_ward: { fill: 'red-100', border: 'red-700', label: 'Outside ward' },
+  other_district: { fill: 'amber-200', border: 'amber-600', label: 'Another district' },
+  far_from_ministers: { fill: 'orange-200', border: 'orange-600', label: 'Far from ministers' },
   location_changed: { fill: 'cyan-100', border: 'cyan-600', label: 'Location changed' },
   ok: { fill: 'stone-200', border: 'stone-500', label: 'No issues' },
 } satisfies Record<string, Paint>;
 
 export function statusOf(flags: HouseholdFlag[]): keyof typeof STATUS_PAINT {
-  for (const s of ['no_companionship', 'far_from_ministers', 'location_changed'] as const) {
+  for (const s of ['no_companionship', 'outside_ward', 'other_district', 'far_from_ministers', 'location_changed'] as const) {
     if (flags.includes(s)) return s;
   }
   return 'ok';

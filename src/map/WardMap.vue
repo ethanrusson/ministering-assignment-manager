@@ -583,7 +583,7 @@ async function saveNote(e: Event) {
 
 const homesDrawn = computed(() =>
   homesToDraw(
-    homes.items.map((h) => ({ id: h.id, p: project(h, origin.value) })),
+    homes.items.map((h) => ({ id: h.id, p: project(h, origin.value), manual: h.source === 'manual' })),
     groups.value.map((g) => g.p),
   ),
 );

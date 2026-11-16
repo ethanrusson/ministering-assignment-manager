@@ -3,7 +3,7 @@
 
 import { distance, type LatLng, type Point } from './geo';
 
-/** A home this close to a member household is that household's house, so it isn't drawn. */
+/** A footprint home this close to a member household is that household's house, so it isn't drawn. */
 export const MEMBER_HOME_RADIUS_M = 25;
 
 /** Reads the JSON printed by scripts/footprints.ts. */
@@ -26,7 +26,10 @@ export function parseHouses(text: string): LatLng[] {
   return out;
 }
 
-/** Homes to draw: every home not under a member household. Points are projected meters. */
-export function homesToDraw<T extends { p: Point }>(homes: T[], members: Point[]): T[] {
-  return homes.filter((h) => !members.some((m) => distance(h.p, m) <= MEMBER_HOME_RADIUS_M));
+/**
+ * Homes to draw: every home not under a member household. A home placed by
+ * hand is always drawn. Points are projected meters.
+ */
+export function homesToDraw<T extends { p: Point; manual: boolean }>(homes: T[], members: Point[]): T[] {
+  return homes.filter((h) => h.manual || !members.some((m) => distance(h.p, m) <= MEMBER_HOME_RADIUS_M));
 }

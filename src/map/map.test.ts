@@ -304,9 +304,13 @@ describe('homes', () => {
     expect(() => parseHouses('[]')).toThrow(/No houses/);
   });
 
-  it('hides homes under a member household', () => {
-    const homes = [{ id: 'near', p: { x: 10, y: 10 } }, { id: 'far', p: { x: 100, y: 0 } }];
-    expect(homesToDraw(homes, [{ x: 0, y: 0 }]).map((h) => h.id)).toEqual(['far']);
+  it('hides footprint homes under a member household, never hand-placed ones', () => {
+    const homes = [
+      { id: 'near', p: { x: 10, y: 10 }, manual: false },
+      { id: 'far', p: { x: 100, y: 0 }, manual: false },
+      { id: 'placed', p: { x: 10, y: 10 }, manual: true },
+    ];
+    expect(homesToDraw(homes, [{ x: 0, y: 0 }]).map((h) => h.id)).toEqual(['far', 'placed']);
   });
 });
 

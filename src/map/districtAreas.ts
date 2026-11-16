@@ -63,7 +63,14 @@ export function districtAreas(
   }
 
   return [...pieces].map(([district, polys]) => {
-    const shape = polygonClipping.union(polys[0], ...polys.slice(1));
+    let shape: MultiPolygon;
+    try {
+      shape = polygonClipping.union(polys[0], ...polys.slice(1));
+    } catch {
+      // polygon-clipping can still fail on near-degenerate input; draw the
+      // pieces unmerged rather than lose the map.
+      shape = polys;
+    }
     return { district, shape, split: shape.length > 1 };
   });
 }
@@ -125,8 +132,10 @@ export function cellOf(site: Point, sites: Point[], block: Ring): Ring {
   return poly;
 }
 
+/** Corners rounded to the centimetre: unrounded, polygon-clipping's union can throw on the real ward. */
 function closeRing(r: Ring): [number, number][] {
-  const pts = r.map((p): [number, number] => [p.x, p.y]);
+  const cm = (v: number) => Math.round(v * 100) / 100;
+  const pts = r.map((p): [number, number] => [cm(p.x), cm(p.y)]);
   pts.push(pts[0]);
   return pts;
 }

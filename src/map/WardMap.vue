@@ -34,8 +34,10 @@ import {
   snapCorner,
   toBoundary,
 } from './boundary';
+import { districtAreas } from './districtAreas';
 import {
   districtAt,
+  fitShapes,
   fromGeo,
   fromRings,
   movesBetween,
@@ -55,7 +57,7 @@ import {
   type Draft,
   type MembershipHousehold,
 } from './districtEdit';
-import DistrictEditPanel, { type PanelChange, type PanelDistrict } from './DistrictEditPanel.vue';
+import DistrictEditPanel, { type DistrictTool, type PanelChange, type PanelDistrict } from './DistrictEditPanel.vue';
 import type { MultiPolygon } from 'polygon-clipping';
 import { usePanZoom, ZOOM_STEP } from '@/canvas/usePanZoom';
 import { districtFamily, districtLabel } from '@/canvas/districtColors';
@@ -83,7 +85,7 @@ import { placeStreetLabels } from './streets';
 import { fitLabels, labelOffset, squareSize } from './labels';
 import HouseholdMark, { type Mark } from './HouseholdMark.vue';
 import LocationsPanel from './LocationsPanel.vue';
-import FiltersPanel from './FiltersPanel.vue';
+import DisplayPanel from './DisplayPanel.vue';
 import GapsPanel from './GapsPanel.vue';
 import LabelPicker from '@/components/LabelPicker.vue';
 import LabelChip from '@/components/LabelChip.vue';
@@ -181,34 +183,41 @@ function companionshipDistrictRankOf(householdId: string): number {
 const colorBy = ref<ColorBy>('district');
 const filters = ref<MapFilters>(emptyFilters());
 /** The side panel that's open, if any; the toolbar's ⋯ menu opens them. */
-const panel = ref<'filters' | 'gaps' | 'locations' | null>(null);
+const panel = ref<'display' | 'gaps' | 'locations' | null>(null);
 const menuOpen = ref(false);
 const togglePanel = (p: NonNullable<typeof panel.value>) => (panel.value = panel.value === p ? null : p);
 
-const menuItems = computed(() => [
-  {
-    label: 'Filters',
-    active: panel.value === 'filters',
-    dot: !!matched.value || colorBy.value !== 'district' || showAll.value,
-    count: 0,
-    run: () => togglePanel('filters'),
-  },
-  { label: 'Gaps', active: panel.value === 'gaps', dot: false, count: 0, run: () => togglePanel('gaps') },
-  {
-    label: 'Locations',
-    active: panel.value === 'locations',
-    dot: false,
-    count: locationsCount.value,
-    run: () => togglePanel('locations'),
-  },
-  {
-    label: 'Edit houses',
-    active: editingHomes.value,
-    dot: false,
-    count: 0,
-    run: () => (editingHomes.value = !editingHomes.value),
-  },
-]);
+/** Something on the map differs from the default display. */
+const displayChanged = computed(() => !!matched.value || colorBy.value !== 'district' || showAll.value || showAreas.value);
+
+/** The ⋯ menu: how the map looks, what needs attention, and the editing modes. */
+const menuSections = computed(() => {
+  const item = (label: string, active: boolean, run: () => unknown, extra: { count?: number; dot?: boolean } = {}) => ({
+    label,
+    active,
+    run,
+    count: extra.count ?? 0,
+    dot: extra.dot ?? false,
+  });
+  return [
+    { title: 'View', items: [item('Display', panel.value === 'display', () => togglePanel('display'), { dot: displayChanged.value })] },
+    {
+      title: 'Review',
+      items: [
+        item('Gaps', panel.value === 'gaps', () => togglePanel('gaps')),
+        item('Locations', panel.value === 'locations', () => togglePanel('locations'), { count: locationsCount.value }),
+      ],
+    },
+    {
+      title: 'Edit',
+      items: [
+        item('Districts', editingDistricts.value, startDistrictEdit),
+        ...(auth.wardRole === 'admin' ? [item('Ward boundary', editingBoundary.value, startBoundaryEdit)] : []),
+        item('Houses', editingHomes.value, startHomesEdit),
+      ],
+    },
+  ];
+});
 
 /** Household ids passing the filters, or null when nothing is filtered. */
 const matched = computed(() => {
@@ -633,6 +642,15 @@ const homesDrawn = computed(() =>
 /** In this mode a tap on empty map adds a home, and a tap on a home removes it. */
 const editingHomes = ref(false);
 
+function startHomesEdit() {
+  cancelDistrictEdit();
+  boundaryDraft.value = null;
+  placing.value = null;
+  selectedId.value = null;
+  panel.value = null;
+  editingHomes.value = true;
+}
+
 function homeAt(at: Point): string | null {
   const half = square.value / 2;
   const hit = homesDrawn.value.find(
@@ -772,6 +790,7 @@ const editingBoundary = computed(() => boundaryDraft.value !== null);
 let dragCorner: { i: number; snap: ReturnType<typeof snapCorner> } | null = null;
 
 function startBoundaryEdit() {
+  cancelDistrictEdit();
   boundaryDraft.value =
     savedOutline.value ?? simplifyRing(generatedOutline.value, OUTLINE_SIMPLIFY_M);
   selectedId.value = null;
@@ -890,15 +909,47 @@ const shapeDraft = ref<Shapes | null>(null);
 const shapes = computed(() => shapeDraft.value ?? savedShapes.value);
 const editingDistricts = computed(() => districtDraft.value !== null);
 const pickedDistrict = ref<string | null>(null);
-/** Lasso mode: corners placed one click at a time, in meters; closing it assigns the households inside. */
-const lasso = ref(false);
+/**
+ * The district editor's tool: tap houses, drag a box over houses, or draw the
+ * picked district's shape (corners placed one click at a time, in meters).
+ */
+const districtTool = ref<DistrictTool>('tap');
 const lassoPts = ref<MapPoint[]>([]);
 /** Where the next corner would go (mouse only), for the line to the cursor. */
 const lassoHover = ref<MapPoint | null>(null);
-watch(lasso, (on) => {
-  if (on) return;
+const drawingShape = computed(() => editingDistricts.value && districtTool.value === 'shape');
+watch(districtTool, (tool) => {
+  if (tool === 'shape') return;
   lassoPts.value = [];
   lassoHover.value = null;
+});
+
+/** The box being dragged with the Box tool, corners in meters. */
+const box = ref<{ from: MapPoint; to: MapPoint } | null>(null);
+
+/** Adds every household inside the box to the picked district (or none). */
+function finishBox() {
+  const b = box.value;
+  box.value = null;
+  if (!b || !districtDraft.value) return;
+  const [x0, x1] = [Math.min(b.from.x, b.to.x), Math.max(b.from.x, b.to.x)];
+  const [y0, y1] = [Math.min(b.from.y, b.to.y), Math.max(b.from.y, b.to.y)];
+  const ids = groups.value
+    .filter((g) => g.p.x >= x0 && g.p.x <= x1 && g.p.y >= y0 && g.p.y <= y1)
+    .flatMap((g) => g.items.map((n) => n.id));
+  districtDraft.value = assign(districtDraft.value, ids, pickedDistrict.value);
+}
+
+const boxRect = computed(() => {
+  const b = box.value;
+  if (!b) return null;
+  const k = vp.scale;
+  return {
+    x: Math.min(b.from.x, b.to.x) * k,
+    y: Math.min(b.from.y, b.to.y) * k,
+    w: Math.abs(b.to.x - b.from.x) * k,
+    h: Math.abs(b.to.y - b.from.y) * k,
+  };
 });
 const savingDistricts = ref(false);
 
@@ -912,8 +963,9 @@ function districtIdOf(householdId: string): string {
 function startDistrictEdit() {
   districtDraft.value = new Map();
   shapeDraft.value = new Map(savedShapes.value);
+  boundaryDraft.value = null;
   pickedDistrict.value = districts.items[0]?.id ?? null;
-  lasso.value = false;
+  districtTool.value = 'tap';
   selectedId.value = null;
   panel.value = null;
   editingHomes.value = false;
@@ -977,9 +1029,17 @@ function applyShapes(after: Shapes) {
 /** Adds the lasso's area to the picked district (or erases it, for No district), then back to tapping. */
 function finishLasso() {
   const ring = lassoPts.value;
-  lasso.value = false;
+  districtTool.value = 'tap';
   if (ring.length < 3 || !districtDraft.value) return;
   applyShapes(paint(shapes.value, pickedDistrict.value, ringShape(ring)));
+}
+
+/** Replaces every district's shape with one worked out from its households; nobody moves. */
+function redrawLines() {
+  const homes = groups.value
+    .flatMap((g) => g.items.map((n) => ({ p: g.p, district: districtIdOf(n.id) })))
+    .filter((h) => h.district !== NO_DISTRICT);
+  shapeDraft.value = fitShapes(districtAreas(wardOutline.value, streetsWorld.value.map((st) => st.pts), homes));
 }
 
 /** A corner of the picked district's shape being dragged. */
@@ -987,13 +1047,16 @@ const shapeDrag = ref<{ pi: number; ri: number; i: number; at: MapPoint; onCorne
 
 /** The picked district's rings while editing, with a dragged corner applied. */
 const pickedRings = computed(() => {
-  const m = editingDistricts.value && !lasso.value && pickedDistrict.value ? shapes.value.get(pickedDistrict.value) : null;
+  const m = editingDistricts.value && districtTool.value !== 'shape' && pickedDistrict.value ? shapes.value.get(pickedDistrict.value) : null;
   if (!m) return [];
   const rings = shapeRings(m);
   const d = shapeDrag.value;
   if (d) rings[d.pi][d.ri] = rings[d.pi][d.ri].map((p, k) => (k === d.i ? d.at : p));
   return rings;
 });
+
+/** An edge needs at least this many screen px to show its "+" add-corner button. */
+const MIN_EDGE_PX = 40;
 
 const shapeHandles = computed(() =>
   pickedRings.value.flatMap((poly, pi) =>
@@ -1008,6 +1071,7 @@ const shapeHandles = computed(() =>
           y: p.y * vp.scale,
           midX: ((p.x + q.x) / 2) * vp.scale,
           midY: ((p.y + q.y) / 2) * vp.scale,
+          roomy: distance(p, q) * vp.scale >= MIN_EDGE_PX,
         };
       }),
     ),
@@ -1145,6 +1209,15 @@ const homeCounts = computed(() => {
   return m;
 });
 
+/** Per district: households (as currently drawn, draft included), companionships, slots at HOUSEHOLD_LIMIT each. */
+const districtCapacity = computed(() =>
+  districts.items.map((d) => {
+    const comps = companionships.items.filter((c) => c.district_id === d.id).length;
+    const homes = homeCounts.value.get(d.id) ?? 0;
+    return { id: d.id, homes, comps, slots: comps * HOUSEHOLD_LIMIT };
+  }),
+);
+
 async function setDistrict(householdId: string, district: string) {
   try {
     await households.setDistricts([{ id: householdId, district }]);
@@ -1200,7 +1273,7 @@ function zoomBy(factor: number) {
  */
 function tapAt(e: MouseEvent, tapped: { key: string; items: { id: string }[] }) {
   if (editingBoundary.value) return;
-  if (editingDistricts.value) return lasso.value ? lassoClick(e) : toggleStack(tapped.items.map((n) => n.id));
+  if (editingDistricts.value) return drawingShape.value ? lassoClick(e) : toggleStack(tapped.items.map((n) => n.id));
   if (placing.value?.kind === 'household') return void placeHouseholdAt(e);
   const p = local(e);
   const x = p.x - vp.tx;
@@ -1257,6 +1330,7 @@ function onPointerDown(e: PointerEvent) {
   const p = local(e);
   pointers.set(e.pointerId, p);
   if (pointers.size >= 2) {
+    box.value = null;
     const [a, b] = [...pointers.values()];
     pinchLast = { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
     dragging = true;
@@ -1264,10 +1338,11 @@ function onPointerDown(e: PointerEvent) {
   }
   dragStart = dragLast = p;
   dragging = false;
+  if (editingDistricts.value && districtTool.value === 'box') box.value = { from: toMeters(p), to: toMeters(p) };
 }
 
 function onPointerMove(e: PointerEvent) {
-  if (lasso.value && lassoPts.value.length && e.pointerType === 'mouse' && !dragging) {
+  if (drawingShape.value && lassoPts.value.length && e.pointerType === 'mouse' && !dragging) {
     lassoHover.value = toMeters(local(e));
   }
   if (!pointers.has(e.pointerId)) return;
@@ -1289,6 +1364,10 @@ function onPointerMove(e: PointerEvent) {
     dragging = true;
     root.value?.setPointerCapture(e.pointerId);
   }
+  if (box.value) {
+    box.value = { ...box.value, to: toMeters(p) };
+    return;
+  }
   panBy(p.x - dragLast.x, p.y - dragLast.y);
   dragLast = p;
 }
@@ -1297,6 +1376,8 @@ function onPointerUp(e: PointerEvent) {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinchLast = null;
   if (pointers.size === 0) {
+    if (box.value && dragging) finishBox();
+    box.value = null;
     suppressClick = dragging;
     dragging = false;
     dragStart = dragLast = null;
@@ -1316,7 +1397,7 @@ function onBackgroundClick(e: MouseEvent) {
   const inside = e
     .composedPath()
     .some((el) => el instanceof HTMLElement && (el.hasAttribute('data-household') || el.hasAttribute('data-no-pan')));
-  if (!inside && editingDistricts.value && lasso.value) return lassoClick(e);
+  if (!inside && drawingShape.value) return lassoClick(e);
   if (inside || editingBoundary.value || editingDistricts.value) return;
   if (placing.value?.kind === 'household') void placeHouseholdAt(e);
   else if (placing.value) return;
@@ -1335,7 +1416,7 @@ function onWheel(e: WheelEvent) {
 
 function onKeydown(e: KeyboardEvent) {
   const typing = e.target instanceof Element && !!e.target.closest('input, textarea');
-  if (lasso.value && lassoPts.value.length && !typing) {
+  if (drawingShape.value && lassoPts.value.length && !typing) {
     if (e.key === 'Enter') return finishLasso();
     if (e.key === 'Backspace') return void (lassoPts.value = lassoPts.value.slice(0, -1));
     if (e.key === 'Escape') return void (lassoPts.value = []);
@@ -1380,6 +1461,7 @@ onBeforeUnmount(() => {
   <div
     ref="root"
     class="relative h-full w-full select-none overflow-clip bg-stone-100"
+    :class="editingDistricts && districtTool !== 'tap' && 'cursor-crosshair'"
     style="touch-action: none"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
@@ -1470,6 +1552,16 @@ onBeforeUnmount(() => {
             stroke-dasharray="1 4"
           />
         </g>
+        <rect
+          v-if="boxRect"
+          :x="boxRect.x"
+          :y="boxRect.y"
+          :width="boxRect.w"
+          :height="boxRect.h"
+          stroke-width="1.5"
+          stroke-dasharray="4 3"
+          :style="{ stroke: v('stone-900'), fill: v('stone-500'), fillOpacity: 0.12 }"
+        />
         <g v-if="lassoPts.length" :style="{ stroke: v('stone-900') }">
           <path
             :d="lassoPath + 'Z'"
@@ -1566,7 +1658,7 @@ onBeforeUnmount(() => {
 
       <template v-if="shapeHandles.length">
         <button
-          v-for="h in shapeHandles"
+          v-for="h in shapeHandles.filter((x) => x.roomy)"
           :key="`mid${h.pi}-${h.ri}-${h.i}`"
           type="button"
           data-no-pan
@@ -1807,7 +1899,8 @@ onBeforeUnmount(() => {
 
     <DistrictEditPanel
       v-if="editingDistricts"
-      v-model:lasso="lasso"
+      v-model:tool="districtTool"
+      :capacity="districtCapacity"
       :districts="panelDistricts"
       :picked="pickedDistrict"
       :changes="panelChanges"
@@ -1818,6 +1911,7 @@ onBeforeUnmount(() => {
       @pick="(id) => (pickedDistrict = id)"
       @rename="renameDistrict"
       @cancel="cancelDistrictEdit"
+      @redraw="redrawLines"
       @save="saveDistricts"
     />
 
@@ -1835,6 +1929,17 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      v-if="editingHomes"
+      data-no-pan
+      class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-stone-900/90 px-3 py-2 text-xs text-stone-50 shadow-lg"
+    >
+      <span class="font-semibold">Houses</span>
+      <button type="button" class="rounded bg-blue-600 px-2 py-0.5 font-semibold" @click="editingHomes = false">
+        Done
+      </button>
+    </div>
+
+    <div
       v-if="placing"
       data-no-pan
       class="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-stone-900/90 px-3 py-2 text-xs text-stone-50 shadow-lg"
@@ -1845,17 +1950,14 @@ onBeforeUnmount(() => {
       <button type="button" class="font-semibold underline" @click="placing = null">Cancel</button>
     </div>
 
-    <FiltersPanel
-      v-if="panel === 'filters'"
+    <DisplayPanel
+      v-if="panel === 'display'"
       v-model:filters="filters"
       v-model:color-by="colorBy"
       v-model:show-areas="showAreas"
       v-model:show-all="showAll"
-      :home-counts="homeCounts"
       :match-count="matched ? matched.size : null"
       @close="panel = null"
-      @edit-boundary="startBoundaryEdit"
-      @edit-districts="startDistrictEdit"
     />
 
     <GapsPanel v-if="panel === 'gaps'" :flags="flags" @close="panel = null" @focus-household="focusForReassign" />
@@ -1929,7 +2031,7 @@ onBeforeUnmount(() => {
             {{ locationsCount }}
           </span>
           <span
-            v-else-if="matched || colorBy !== 'district' || showAll"
+            v-else-if="displayChanged"
             class="absolute right-1 top-1.5 h-2 w-2 rounded-full bg-blue-600"
           />
         </button>
@@ -1938,25 +2040,30 @@ onBeforeUnmount(() => {
           role="menu"
           class="absolute bottom-full right-0 mb-3 w-48 rounded-xl border border-stone-200 bg-white py-1 text-sm shadow-xl"
         >
-          <button
-            v-for="item in menuItems"
-            :key="item.label"
-            type="button"
-            role="menuitemcheckbox"
-            :aria-checked="item.active"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-stone-100"
-            @click="item.run(), (menuOpen = false)"
-          >
-            <span class="flex-1" :class="item.active && 'font-semibold'">{{ item.label }}</span>
-            <span
-              v-if="item.count"
-              class="min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+          <div v-for="section in menuSections" :key="section.title" class="py-1 [&+&]:border-t [&+&]:border-stone-200">
+            <div class="px-3 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+              {{ section.title }}
+            </div>
+            <button
+              v-for="item in section.items"
+              :key="item.label"
+              type="button"
+              role="menuitemcheckbox"
+              :aria-checked="item.active"
+              class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-stone-100"
+              @click="item.run(), (menuOpen = false)"
             >
-              {{ item.count }}
-            </span>
-            <span v-else-if="item.dot" class="h-2 w-2 rounded-full bg-blue-600" />
-            <CheckIcon v-if="item.active" class="h-4 w-4" />
-          </button>
+              <span class="flex-1" :class="item.active && 'font-semibold'">{{ item.label }}</span>
+              <span
+                v-if="item.count"
+                class="min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-semibold leading-4 text-white"
+              >
+                {{ item.count }}
+              </span>
+              <span v-else-if="item.dot" class="h-2 w-2 rounded-full bg-blue-600" />
+              <CheckIcon v-if="item.active" class="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

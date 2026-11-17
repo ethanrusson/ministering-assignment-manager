@@ -1,15 +1,12 @@
 <script setup lang="ts">
-// Color, lines, filters and districts for the map (docs/ward-map-prd.md,
-// Phases 3 and 6). Filters combine with AND across types and OR within a type.
+// How the map looks (docs/ward-map-prd.md, Phases 3 and 6): colour, what's
+// drawn, and filters. Filters combine with AND across types and OR within a type.
 
 import { computed } from 'vue';
 import { XMarkIcon } from '@heroicons/vue/24/outline';
-import { useCompanionshipsStore } from '@/stores/companionships';
-import { useAuthStore } from '@/stores/auth';
 import { useDistrictsStore } from '@/stores/districts';
 import { useLabelsStore } from '@/stores/labels';
-import { districtFamily, districtLabel } from '@/canvas/districtColors';
-import { HOUSEHOLD_LIMIT } from '@/lib/validation';
+import { districtLabel } from '@/canvas/districtColors';
 import { labelChipStyle } from '@/lib/labelColors';
 import { HOUSEHOLD_FLAG_LABELS } from '@/lib/flags';
 import { STATUS_PAINT, type ColorBy, type MapFilters } from './mapFilters';
@@ -20,8 +17,6 @@ const props = defineProps<{
   matchCount: number | null;
   showAreas: boolean;
   showAll: boolean;
-  /** Households per district id. */
-  homeCounts: Map<string, number>;
 }>();
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -29,14 +24,10 @@ const emit = defineEmits<{
   (e: 'update:colorBy', v: ColorBy): void;
   (e: 'update:showAreas', v: boolean): void;
   (e: 'update:showAll', v: boolean): void;
-  (e: 'editBoundary'): void;
-  (e: 'editDistricts'): void;
 }>();
 
-const auth = useAuthStore();
 const labels = useLabelsStore();
 const districts = useDistrictsStore();
-const companionships = useCompanionshipsStore();
 
 const v = (name: string) => `rgb(var(--c-${name}))`;
 
@@ -54,16 +45,6 @@ const anyFilter = computed(
 function clear() {
   emit('update:filters', { labels: new Set(), flags: new Set(), districts: new Set() });
 }
-
-/** Per district: its households, companionships, and slots at HOUSEHOLD_LIMIT each. */
-const districtRows = computed(() =>
-  districts.items.map((d, i) => {
-    const comps = companionships.items.filter((c) => c.district_id === d.id);
-    const homes = props.homeCounts.get(d.id) ?? 0;
-    const slots = comps.length * HOUSEHOLD_LIMIT;
-    return { id: d.id, label: `${districtLabel(i)} · ${d.name}`, family: districtFamily(i), homes, comps: comps.length, slots, open: slots - homes };
-  }),
-);
 </script>
 
 <template>
@@ -72,7 +53,7 @@ const districtRows = computed(() =>
     class="absolute bottom-24 right-4 top-16 z-20 flex w-80 cursor-default flex-col rounded-xl border border-stone-200 bg-white text-sm shadow-xl"
   >
     <header class="flex items-center justify-between border-b border-stone-200 px-3 py-2">
-      <h2 class="font-semibold">Filters</h2>
+      <h2 class="font-semibold">Display</h2>
       <button
         type="button"
         class="rounded-md p-1 text-stone-500 hover:bg-stone-100"
@@ -111,16 +92,27 @@ const districtRows = computed(() =>
       </section>
 
       <section>
-        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Lines</h3>
-        <button
-          type="button"
-          class="rounded-full border px-2.5 py-0.5 text-xs"
-          :class="showAll ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
-          :aria-pressed="showAll"
-          @click="emit('update:showAll', !showAll)"
-        >
-          All connections
-        </button>
+        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Show</h3>
+        <div class="flex flex-wrap gap-1">
+          <button
+            type="button"
+            class="rounded-full border px-2.5 py-0.5 text-xs"
+            :class="showAll ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
+            :aria-pressed="showAll"
+            @click="emit('update:showAll', !showAll)"
+          >
+            All connections
+          </button>
+          <button
+            type="button"
+            class="rounded-full border px-2.5 py-0.5 text-xs"
+            :class="showAreas ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
+            :aria-pressed="showAreas"
+            @click="emit('update:showAreas', !showAreas)"
+          >
+            District shapes
+          </button>
+        </div>
       </section>
 
       <section>
@@ -175,63 +167,6 @@ const districtRows = computed(() =>
         </div>
       </section>
 
-      <section v-if="districtRows.length">
-        <h3 class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-500">Districts</h3>
-        <div class="mb-2 flex flex-wrap gap-1">
-          <button
-            type="button"
-            class="rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
-            @click="emit('editDistricts')"
-          >
-            Edit districts
-          </button>
-          <button
-            v-if="auth.wardRole === 'admin'"
-            type="button"
-            class="rounded-full border border-stone-300 px-2.5 py-0.5 text-xs hover:bg-stone-50"
-            @click="emit('editBoundary')"
-          >
-            Edit boundary
-          </button>
-          <button
-            type="button"
-            class="rounded-full border px-2.5 py-0.5 text-xs"
-            :class="showAreas ? 'border-stone-800 bg-stone-800 text-white' : 'border-stone-300 hover:bg-stone-50'"
-            :aria-pressed="showAreas"
-            @click="emit('update:showAreas', !showAreas)"
-          >
-            District areas
-          </button>
-        </div>
-        <table class="w-full text-xs">
-          <thead class="text-stone-500">
-            <tr>
-              <th class="text-left font-normal"></th>
-              <th class="text-right font-normal">Homes</th>
-              <th class="text-right font-normal">Comps</th>
-              <th class="text-right font-normal">Slots</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in districtRows" :key="r.id">
-              <td class="py-0.5">
-                <span
-                  class="rounded-full px-2 py-px font-semibold"
-                  :style="{ backgroundColor: v(`${r.family}-100`), color: v(`${r.family}-700`) }"
-                >
-                  {{ r.label }}
-                </span>
-                <span class="ml-1" :class="r.open < 0 ? 'font-semibold text-red-700' : 'text-stone-500'">
-                  {{ r.open < 0 ? `short ${-r.open}` : `${r.open} open` }}
-                </span>
-              </td>
-              <td class="text-right tabular-nums">{{ r.homes }}</td>
-              <td class="text-right tabular-nums">{{ r.comps }}</td>
-              <td class="text-right tabular-nums">{{ r.slots }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
 
     </div>
   </div>

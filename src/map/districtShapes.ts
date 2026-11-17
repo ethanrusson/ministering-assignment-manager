@@ -8,6 +8,7 @@
 
 import polygonClipping, { type MultiPolygon } from 'polygon-clipping';
 import type { DistrictShapeGeo } from '@/types/database';
+import { simplifyRing } from './boundary';
 import { pointInRing, project, unproject, type LatLng, type Point } from './geo';
 
 export type Shapes = Map<string, MultiPolygon>;
@@ -55,6 +56,32 @@ export function setShape(shapes: Shapes, district: string | null, shape: MultiPo
 export function paint(shapes: Shapes, district: string | null, area: MultiPolygon): Shapes {
   const own = district ? shapes.get(district) : undefined;
   return setShape(shapes, district, own ? safe(() => polygonClipping.union(own, area), area) : area);
+}
+
+/** Fitted shapes drop corners within this many meters of a straight edge, so they're easy to adjust. */
+export const FIT_SIMPLIFY_M = 4;
+/** Pieces smaller than this, in square meters, left over from fitting are dropped. */
+const MIN_PIECE_M2 = 100;
+
+const ringArea = (ring: [number, number][]) =>
+  Math.abs(ring.reduce((sum, [x, y], i) => (i ? sum + ring[i - 1][0] * y - x * ring[i - 1][1] : sum), 0)) / 2;
+
+/**
+ * Shapes from worked-out district areas (districtAreas.ts, "Redraw lines"):
+ * simplified to fewer corners, never overlapping, without slivers.
+ */
+export function fitShapes(areas: { district: string; shape: MultiPolygon }[], tolerance = FIT_SIMPLIFY_M): Shapes {
+  let shapes: Shapes = new Map();
+  for (const a of areas) {
+    const rings = shapeRings(a.shape).map((poly) => poly.map((ring) => simplifyRing(ring, tolerance)));
+    shapes = setShape(shapes, a.district, fromRings(rings));
+  }
+  const kept: Shapes = new Map();
+  for (const [d, m] of shapes) {
+    const pieces = m.filter(([outer]) => ringArea(outer) >= MIN_PIECE_M2);
+    if (pieces.length) kept.set(d, pieces);
+  }
+  return kept;
 }
 
 /** The district whose shape contains `p`, if any. */

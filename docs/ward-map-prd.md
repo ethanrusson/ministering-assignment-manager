@@ -292,7 +292,7 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
    - the four nearest companionships, measured to the midpoint between the ministers' homes, plus the current one and "No companionship"
    - each row shows its district, distance, and households after the move against the limit (e.g. 6/5 in red)
 2. Choosing a row writes `companionship_households` through the existing store, so the board, worklist and realtime update.
-3. A districts panel: for each district, households, companionships, slots (companionships × 5) and open or short slots. Before Phase 6 this counts households by their companionship's district; after Phase 6, by `households.district_id`. Built as a "Districts" section of the Filters panel; gaps have their own panel. Filters, Gaps, Locations and Edit houses sit in the toolbar's ⋯ menu.
+3. A districts panel: for each district, households, companionships, slots (companionships × 5) and open or short slots. Before Phase 6 this counts households by their companionship's district; after Phase 6, by `households.district_id`. Built into the Districts editor's side panel. The toolbar's ⋯ menu groups the map's controls: View (Display: colour, connections, district shapes, filters), Review (Gaps, Locations) and Edit (Districts, Ward boundary for admins, Houses).
 4. The gaps panel (Phase 3) links straight into reassigning: a household picked from Gaps opens with its Reassign list showing.
 
 **Acceptance**
@@ -340,25 +340,28 @@ Flag rules are pure functions next to `validation.ts`, with unit tests. Acknowle
 
 **Scope**
 1. **Ward boundary.** The starting outline is generated around all households with a margin, then edited by dragging corners. Corners snap to streets and to other corners. Stored in `wards.boundary`. This enables the `outside_ward` review items and flag.
-2. **District membership.** An Edit districts screen:
-   - Pick a district; tap households to add them, tap again to remove.
-   - Lasso draws the picked district's shape (see 3).
+2. **District membership.** A Districts editor (⋯ → Edit → Districts). Pick a district, then use one of three tools:
+   - **Tap:** tap households to add them, tap again to remove.
+   - **Box:** drag a rectangle; every household inside joins the picked district (with No district, leaves). Dragging draws the box instead of panning.
+   - **Shape:** draws the picked district's shape (see 3).
+   - The side panel lists each district's homes (draft included), companionships and slots.
    - Shared-point boxes move as a unit.
    - "No district" is a valid choice.
    - Name editing and the district list come from the existing `districts` rows (D11).
    - An "If you save" panel lists each household whose district changes, and whether that creates or clears a "Ministered from another district" flag.
 3. **Drawn district shapes (D6).** Each district's shape is drawn by hand and stored in `districts.boundary` (GeoJSON MultiPolygon, migration 0008):
-   1. Pick a district, turn on Lasso, and click corners one at a time (pan and zoom freely between them). Click the first corner or press Enter to close; Backspace removes the last corner; Esc discards the shape.
+   1. Pick a district, choose Shape, and click corners one at a time (pan and zoom freely between them). Click the first corner or press Enter to close; Backspace removes the last corner; Esc discards the shape.
    2. A closed lasso adds its area to the picked district's shape and cuts it out of every other district's shape, so shapes never overlap. With "No district" picked, it erases.
    3. The picked district's corners show as handles: drag to move (snapping to streets, the ward outline and other shapes' corners, so neighbours can share edges), "+" to add a corner, drop on a neighbouring corner to remove one.
    4. Households follow a shape only where it changed: a household whose containing shape is different afterwards joins that district, or none. A household tapped into a district against the lines stays an exception until a shape edit crosses it.
    5. Shapes are part of the editor's draft and saved with the household changes.
+   6. **Redraw lines** replaces every shape with one worked out from the households' current districts (`districtAreas.ts`): the ward is split into street blocks, a block goes to its households' district (or the nearest household's, if empty), and mixed blocks are divided halfway between households. Results are lightly simplified (`FIT_SIMPLIFY_M`) and can then be adjusted by hand. Nobody moves.
 4. *(Replaced.)* Shapes are drawn on purpose, so a district in several pieces is not flagged.
 5. **Move-ins.** A household with no district gets a suggested district: the drawn shape its point falls in. The suggestion appears in the household popover and the review queue, and the user confirms it. (Whether to apply it automatically is a checkpoint question.) *As built:* only after the first membership save; listed under Locations → No district.
 6. **Flags.** Turn on "Ministered from another district" and "Outside ward". Switch the districts panel to `households.district_id`. *As built:* outside-ward items are rechecked on every boundary save and location import. Square colour, the district pill, the district filter and the districts panel follow the household's own district; minister lines and the reassign list follow the companionship's. Status colours, highest first: no companionship, outside ward, another district (amber), far from ministers (now orange), location changed.
 7. **Initial membership.** On first use, set `households.district_id` from each household's companionship's district. Households without a companionship start with no district.
 
-**Geometry.** `polygon-clipping` (0.15.7, about 10 KB gzipped) does the union and difference for drawn shapes, with corners rounded to the centimetre (unrounded input made its union throw on the real ward). *History:* the phase first built automatic areas (ward split into street blocks by a custom planar graph, blocks assigned by their households); the owner chose drawn shapes instead, and that code was removed.
+**Geometry.** `polygon-clipping` (0.15.7, about 10 KB gzipped) does the union and difference for drawn shapes, with corners rounded to the centimetre (unrounded input made its union throw on the real ward). *History:* the phase first built automatic areas (ward split into street blocks by a custom planar graph, blocks assigned by their households); the owner chose drawn shapes instead, and that geometry now only feeds "Redraw lines".
 
 **Acceptance**
 - Shapes never overlap; drawing or editing one district's shape cuts it from the others. Covered by unit tests.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MultiPolygon } from 'polygon-clipping';
-import { districtAt, fromGeo, movesBetween, paint, ringShape, setShape, shapeRings, toGeo, type Shapes } from './districtShapes';
+import { districtAreas } from './districtAreas';
+import { districtAt, fitShapes, fromGeo, movesBetween, paint, ringShape, setShape, shapeRings, toGeo, type Shapes } from './districtShapes';
 
 const P = (x: number, y: number) => ({ x, y });
 const box = (x0: number, y0: number, x1: number, y1: number) => ringShape([P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)]);
@@ -74,5 +75,33 @@ describe('district shapes', () => {
       expect(y).toBeCloseTo(m[0][0][i][1], 1);
     });
     expect(fromGeo(null, origin)).toBeNull();
+  });
+});
+
+describe('fitShapes', () => {
+  // A 300 m square ward with a street grid: two columns, two rows.
+  const ward = [P(0, 0), P(300, 0), P(300, 300), P(0, 300)];
+  const streets = [
+    [P(150, -20), P(150, 320)],
+    [P(-20, 150), P(320, 150)],
+  ];
+  const homes = [
+    { p: P(60, 60), district: 'a' },
+    { p: P(240, 60), district: 'a' },
+    { p: P(60, 240), district: 'b' },
+    { p: P(200, 200), district: 'b' },
+    { p: P(260, 260), district: 'a' },
+  ];
+
+  it('puts every household inside its own district, with no overlaps', () => {
+    const shapes = fitShapes(districtAreas(ward, streets, homes));
+    for (const h of homes) expect(districtAt(shapes, h.p)).toBe(h.district);
+    expect(area(shapes.get('a')!) + area(shapes.get('b')!)).toBeCloseTo(90000, -1);
+  });
+
+  it('keeps few corners on straight edges', () => {
+    const wobbly = ringShape([P(0, 0), P(50, 0.5), P(100, 0), P(100, 100), P(0, 100)]);
+    const shapes = fitShapes([{ district: 'a', shape: wobbly }]);
+    expect(shapeRings(shapes.get('a')!)[0][0]).toHaveLength(4);
   });
 });
